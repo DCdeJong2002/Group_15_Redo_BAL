@@ -1,0 +1,33 @@
+01) deltaP windtunnel [Pa]
+02) barometric pressure [hPa]
+03) temperature [deg C]
+04) density [kg/m3]
+05) dynamic pressure [Pa]
+06) freestream velocity [m/s]
+07) Reynolds number (based on chord) [-]
+08) not used [-]
+09) not used [-]
+10) not used [-]
+11) not used [-]
+12) Angle of attack [deg]
+13) Angle of sideslip [deg]
+14) RPS motor 1 [Hz]
+15) dPhi motor 1 - motor 1 [deg] (not used)
+16) standard deviation RPS motor 1 [Hz]
+17) current motor 1 [A]
+18) temperature motor 1 [deg C]
+19) standard deviation dPhi motor 1 - motor 1 [deg] (not used)
+20) voltage motor 1 [V]
+21) RPS motor 1 [Hz]
+22) dPhi motor 1 - motor 1 [deg] (not used)
+23) standard deviation RPS motor 1 [Hz]
+24) current motor 1 [A]
+25) temperature motor 1 [deg C]
+26) standard deviation dPhi motor 1 - motor 1 [deg] (not used)
+27) voltage motor 1 [V]
+28) day
+29) month
+30) year
+31) hour
+32) minutes
+33) seconds

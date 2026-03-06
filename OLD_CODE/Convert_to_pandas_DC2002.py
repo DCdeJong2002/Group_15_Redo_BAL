@@ -82,10 +82,13 @@ def parse_windtunnel_table(source, *, parse_time=False):
     return df
 
 
+
+
+
 # 1) From a file path
-df1 = parse_windtunnel_table(r"C:\Users\douwe\AE4115-23_EXPERIMENTAL SIMULATIONS\Group_15_Redo_BAL\Redo_BAL\corr_rudder_0_elevator_0.txt")
-df2 = parse_windtunnel_table(r"C:\Users\douwe\AE4115-23_EXPERIMENTAL SIMULATIONS\Group_15_Redo_BAL\Redo_BAL\raw_rudder_0_elevator_0.txt")
-df3 = parse_windtunnel_table(r"C:\Users\douwe\AE4115-23_EXPERIMENTAL SIMULATIONS\Group_15_Redo_BAL\Redo_BAL\unc_rudder_0_elevator_0.txt")
+df1 = parse_windtunnel_table(r"Redo_BAL\corr_rudder_0_elevator_0.txt")
+df2 = parse_windtunnel_table(r"Redo_BAL\raw_rudder_0_elevator_0.txt")
+df3 = parse_windtunnel_table(r"Redo_BAL\unc_rudder_0_elevator_0.txt")
 
 
 print(df1)

@@ -68,7 +68,6 @@ plots/
 # Data files (optional)
 # ==========================
 data_large/
-*.csv
 *.h5
 *.hdf5
 

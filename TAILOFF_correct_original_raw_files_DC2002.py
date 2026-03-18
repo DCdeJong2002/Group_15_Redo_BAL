@@ -743,7 +743,7 @@ def build_combined_rudder_dataframe(BAL: Dict[str, Any], D: float = 0.2032) -> p
 
         df["config"] = cfg
         df["source_file"] = source_file
-        df["dR"] = parse_rudder_deflection_deg(source_file)
+        df["dR"] = 0
         df["dE"] = 0  # Assuming a default value for dE
 
         # Requested rounded columns

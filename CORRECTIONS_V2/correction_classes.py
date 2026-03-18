@@ -56,6 +56,10 @@ class BaseCorrector:
         print(f"Saved file: {out_path}")
         return out_path
 
+
+#=============================================================================================
+#Model-off data
+#=============================================================================================
 class ModelOffCorrector(BaseCorrector):
     """
     Applies model-off correction to a dataframe.
@@ -171,7 +175,9 @@ class ModelOffCorrector(BaseCorrector):
 
         return merged
 
-
+#=============================================================================================
+#Prop-off data
+#=============================================================================================
 class PropOffData(BaseCorrector):
     """
     Holds and corrects a prop-off dataframe.
@@ -443,6 +449,177 @@ class PropOffData(BaseCorrector):
         return self.df
 
 
+    def apply_streamline_curvature_correction(
+        self,
+        tailoff,
+        tau: float,
+        delta: float,
+        geom_factor: float = 1.0,
+        cl_source_col: str = "CL_solid_blockage_corr",
+        cm_source_col: str = "CMpitch_solid_blockage_corr",
+        save_csv: bool = False,
+        filename: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Apply streamline-curvature correction using tail-off data.
+
+        Uses:
+        - CLw from tailoff.grid_df matched on (V_round, AoA_round, AoS_round)
+        - CL-alpha from tailoff.cl_a_df matched on (V_round, AoS_round)
+
+        Formulae
+        --------
+        Delta_alpha_sc = tau * delta * geom_factor * CLw
+        Delta_CL_sc    = - Delta_alpha_sc * a
+        Delta_Cm_sc    = -0.25 * Delta_CL_sc
+
+        where:
+        - a = CL-alpha in rad^-1
+        - CLw is taken from tail-off grid
+
+        Parameters
+        ----------
+        tailoff : TailOffData
+            TailOffData instance with grid_df and cl_a_df already available.
+        tau : float
+            Tau factor in the streamline-curvature correction.
+        delta : float
+            Delta factor in the streamline-curvature correction.
+        geom_factor : float
+            Geometric prefactor multiplying tau * delta * CLw.
+            Set this to your (S/C) or equivalent term if needed.
+        cl_source_col : str
+            CL column in self.df to correct.
+        cm_source_col : str
+            Pitching moment column in self.df to correct.
+        save_csv : bool
+            If True, save output CSV.
+        filename : str or None
+            Output CSV filename.
+
+        Returns
+        -------
+        pd.DataFrame
+            Corrected dataframe.
+        """
+        if tailoff.grid_df is None:
+            raise ValueError("tailoff.grid_df is not available. Run tailoff.build_alpha_slice_grid_by_velocity() first.")
+        if tailoff.cl_a_df is None:
+            raise ValueError("tailoff.cl_a_df is not available. Run tailoff.compute_cl_alpha_slope_by_case() first.")
+
+        df = self.df.copy()
+
+        # --------------------------------------------------------
+        # Ensure rounded matching columns exist
+        # --------------------------------------------------------
+        if "AoA_round" not in df.columns:
+            if "AoA" not in df.columns:
+                raise ValueError("Need either 'AoA_round' or 'AoA' in prop-off dataframe.")
+            df["AoA_round"] = self.round_to_half(df["AoA"])
+
+        if "AoS_round" not in df.columns:
+            if "AoS" not in df.columns:
+                raise ValueError("Need either 'AoS_round' or 'AoS' in prop-off dataframe.")
+            df["AoS_round"] = self.round_to_half(df["AoS"])
+
+        if "V_round" not in df.columns:
+            if "V_solid_blockage_corr" in df.columns:
+                df["V_round"] = self.round_to_half(df["V_solid_blockage_corr"])
+            elif "V" in df.columns:
+                df["V_round"] = self.round_to_half(df["V"])
+            else:
+                raise ValueError("Need one of: 'V_round', 'V_solid_blockage_corr', or 'V' in prop-off dataframe.")
+
+        self.require_columns(df, ["V_round", "AoA_round", "AoS_round", cl_source_col, cm_source_col],
+                            context="PropOff streamline curvature correction")
+
+        # --------------------------------------------------------
+        # Tail-off CLw lookup
+        # --------------------------------------------------------
+        tail_grid = tailoff.grid_df.copy()
+        self.require_columns(
+            tail_grid,
+            ["V_round", "AoA_round", "AoS_round", "CL_solid_blockage_corr"],
+            context="TailOff grid for streamline curvature correction"
+        )
+
+        tail_grid_lookup = (
+            tail_grid[["V_round", "AoA_round", "AoS_round", "CL_solid_blockage_corr"]]
+            .drop_duplicates(subset=["V_round", "AoA_round", "AoS_round"])
+            .rename(columns={"CL_solid_blockage_corr": "CLw_tailoff"})
+        )
+
+        df = df.merge(
+            tail_grid_lookup,
+            on=["V_round", "AoA_round", "AoS_round"],
+            how="left"
+        )
+
+        # --------------------------------------------------------
+        # Tail-off CL-alpha lookup
+        # --------------------------------------------------------
+        cl_a_df = tailoff.cl_a_df.copy()
+        self.require_columns(
+            cl_a_df,
+            ["V_round", "AoS_round", "cl_alpha_slope_per_deg"],
+            context="TailOff CL-alpha table for streamline curvature correction"
+        )
+
+        cl_a_lookup = (
+            cl_a_df[["V_round", "AoS_round", "cl_alpha_slope_per_deg"]]
+            .drop_duplicates(subset=["V_round", "AoS_round"])
+            .rename(columns={"cl_alpha_slope_per_deg": "CL_alpha_per_deg_tailoff"})
+        )
+
+        df = df.merge(
+            cl_a_lookup,
+            on=["V_round", "AoS_round"],
+            how="left"
+        )
+
+        # --------------------------------------------------------
+        # Convert CL-alpha to per radian
+        # --------------------------------------------------------
+        df["CL_alpha_per_rad_tailoff"] = df["CL_alpha_per_deg_tailoff"] * (180.0 / np.pi)
+
+        # --------------------------------------------------------
+        # Compute streamline-curvature corrections
+        # --------------------------------------------------------
+        df["delta_alpha_sc_rad"] = tau * delta * geom_factor * df["CLw_tailoff"]
+
+        # Convert to degrees
+        df["delta_alpha_sc_deg"] = np.degrees(df["delta_alpha_sc_rad"])
+
+        # Apply AoA correction
+        if "AoA" in df.columns:
+            df["AoA_streamline_curvature_corr"] = df["AoA"] + df["delta_alpha_sc_deg"]
+        elif "AoA_round" in df.columns:
+            df["AoA_streamline_curvature_corr"] = df["AoA_round"] + df["delta_alpha_sc_deg"]
+
+        df["delta_CL_sc"] = -df["delta_alpha_sc_rad"] * df["CL_alpha_per_rad_tailoff"]
+        df["delta_CMpitch_sc"] = -0.25 * df["delta_CL_sc"]
+
+        # --------------------------------------------------------
+        # Apply corrections
+        # --------------------------------------------------------
+        df[f"{cl_source_col}_sc_corr"] = df[cl_source_col] + df["delta_CL_sc"]
+        df[f"{cm_source_col}_sc_corr"] = df[cm_source_col] + df["delta_CMpitch_sc"]
+
+        # Diagnostics
+        df["streamline_curvature_data_found"] = (
+            df["CLw_tailoff"].notna() & df["CL_alpha_per_rad_tailoff"].notna()
+        )
+
+        self.df = df
+
+        if save_csv:
+            save_name = filename or "propOff_streamline_curvature_corrected.csv"
+            self.save_df(self.df, save_name)
+
+        return self.df
+#=============================================================================================
+#prop-on data
+#=============================================================================================
 class PropOnData(BaseCorrector):
     """
     Holds and corrects a prop-on dataframe.
@@ -466,7 +643,7 @@ class PropOnData(BaseCorrector):
         self.clip_negative_cdsep = clip_negative_cdsep
         self.velocity_tolerance = velocity_tolerance
         self.fit_df: Optional[pd.DataFrame] = None
-        
+
     def _reorder_solid_blockage_columns(self) -> None:
         df = self.df
         new_order = []
@@ -734,3 +911,699 @@ class PropOnData(BaseCorrector):
             self.save_df(self.df, save_name)
 
         return self.df
+    
+    def apply_streamline_curvature_correction(
+        self,
+        tailoff,
+        tau: float,
+        delta: float,
+        geom_factor: float = 1.0,
+        cl_source_col: str = "CL_solid_blockage_corr",
+        cm_source_col: str = "CMpitch_solid_blockage_corr",
+        save_csv: bool = False,
+        filename: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Apply streamline-curvature correction using tail-off data.
+
+        Uses:
+        - CLw from tailoff.grid_df matched on (V_round, AoA_round, AoS_round)
+        - CL-alpha from tailoff.cl_a_df matched on (V_round, AoS_round)
+
+        Formulae
+        --------
+        Delta_alpha_sc = tau * delta * geom_factor * CLw
+        Delta_CL_sc    = - Delta_alpha_sc * a
+        Delta_Cm_sc    = -0.25 * Delta_CL_sc
+
+        where:
+        - a = CL-alpha in rad^-1
+        - CLw is taken from tail-off grid
+        """
+        if tailoff.grid_df is None:
+            raise ValueError("tailoff.grid_df is not available. Run tailoff.build_alpha_slice_grid_by_velocity() first.")
+        if tailoff.cl_a_df is None:
+            raise ValueError("tailoff.cl_a_df is not available. Run tailoff.compute_cl_alpha_slope_by_case() first.")
+
+        df = self.df.copy()
+
+        # --------------------------------------------------------
+        # Ensure rounded matching columns exist
+        # --------------------------------------------------------
+        if "AoA_round" not in df.columns:
+            if "AoA" not in df.columns:
+                raise ValueError("Need either 'AoA_round' or 'AoA' in prop-on dataframe.")
+            df["AoA_round"] = self.round_to_half(df["AoA"])
+
+        if "AoS_round" not in df.columns:
+            if "AoS" not in df.columns:
+                raise ValueError("Need either 'AoS_round' or 'AoS' in prop-on dataframe.")
+            df["AoS_round"] = self.round_to_half(df["AoS"])
+
+        if "V_round" not in df.columns:
+            if "V_solid_blockage_corr" in df.columns:
+                df["V_round"] = self.round_to_half(df["V_solid_blockage_corr"])
+            elif "V" in df.columns:
+                df["V_round"] = self.round_to_half(df["V"])
+            else:
+                raise ValueError("Need one of: 'V_round', 'V_solid_blockage_corr', or 'V' in prop-on dataframe.")
+
+        self.require_columns(df, ["V_round", "AoA_round", "AoS_round", cl_source_col, cm_source_col],
+                            context="PropOn streamline curvature correction")
+
+        # --------------------------------------------------------
+        # Tail-off CLw lookup
+        # --------------------------------------------------------
+        tail_grid = tailoff.grid_df.copy()
+        self.require_columns(
+            tail_grid,
+            ["V_round", "AoA_round", "AoS_round", "CL_solid_blockage_corr"],
+            context="TailOff grid for streamline curvature correction"
+        )
+
+        tail_grid_lookup = (
+            tail_grid[["V_round", "AoA_round", "AoS_round", "CL_solid_blockage_corr"]]
+            .drop_duplicates(subset=["V_round", "AoA_round", "AoS_round"])
+            .rename(columns={"CL_solid_blockage_corr": "CLw_tailoff"})
+        )
+
+        df = df.merge(
+            tail_grid_lookup,
+            on=["V_round", "AoA_round", "AoS_round"],
+            how="left"
+        )
+
+        # --------------------------------------------------------
+        # Tail-off CL-alpha lookup
+        # --------------------------------------------------------
+        cl_a_df = tailoff.cl_a_df.copy()
+        self.require_columns(
+            cl_a_df,
+            ["V_round", "AoS_round", "cl_alpha_slope_per_deg"],
+            context="TailOff CL-alpha table for streamline curvature correction"
+        )
+
+        cl_a_lookup = (
+            cl_a_df[["V_round", "AoS_round", "cl_alpha_slope_per_deg"]]
+            .drop_duplicates(subset=["V_round", "AoS_round"])
+            .rename(columns={"cl_alpha_slope_per_deg": "CL_alpha_per_deg_tailoff"})
+        )
+
+        df = df.merge(
+            cl_a_lookup,
+            on=["V_round", "AoS_round"],
+            how="left"
+        )
+
+        # --------------------------------------------------------
+        # Convert CL-alpha to per radian
+        # --------------------------------------------------------
+        df["CL_alpha_per_rad_tailoff"] = df["CL_alpha_per_deg_tailoff"] * (180.0 / np.pi)
+
+        # --------------------------------------------------------
+        # Compute streamline-curvature corrections
+        # --------------------------------------------------------
+        df["delta_alpha_sc_rad"] = tau * delta * geom_factor * df["CLw_tailoff"]
+        # Convert to degrees
+        df["delta_alpha_sc_deg"] = np.degrees(df["delta_alpha_sc_rad"])
+
+        # Apply AoA correction
+        if "AoA" in df.columns:
+            df["AoA_streamline_curvature_corr"] = df["AoA"] + df["delta_alpha_sc_deg"]
+        elif "AoA_round" in df.columns:
+            df["AoA_streamline_curvature_corr"] = df["AoA_round"] + df["delta_alpha_sc_deg"]
+
+        df["delta_CL_sc"] = -df["delta_alpha_sc_rad"] * df["CL_alpha_per_rad_tailoff"]
+        df["delta_CMpitch_sc"] = -0.25 * df["delta_CL_sc"]
+
+        # --------------------------------------------------------
+        # Apply corrections
+        # --------------------------------------------------------
+        df[f"{cl_source_col}_sc_corr"] = df[cl_source_col] + df["delta_CL_sc"]
+        df[f"{cm_source_col}_sc_corr"] = df[cm_source_col] + df["delta_CMpitch_sc"]
+
+        df["streamline_curvature_data_found"] = (
+            df["CLw_tailoff"].notna() & df["CL_alpha_per_rad_tailoff"].notna()
+        )
+
+        self.df = df
+
+        if save_csv:
+            save_name = filename or "propOn_streamline_curvature_corrected.csv"
+            self.save_df(self.df, save_name)
+
+        return self.df
+    
+#=============================================================================================
+#Tail-off data
+#=============================================================================================
+
+class TailOffData(BaseCorrector):
+    """
+    Holds and corrects a tail-off dataframe.
+
+    For now this class provides:
+    - solid blockage correction
+
+    It is structured the same way as PropOffData / PropOnData:
+    - stores working dataframe in self.df
+    - methods return a dataframe
+    - optional CSV saving
+    - configurable save directory
+    """
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        e_constant: float = 0.006406642,
+        s_ref: float = 0.2172,
+        test_section_area: float = 2.07,
+        clip_negative_cdsep: bool = True,
+        save_dir: str | Path | None = None,
+    ) -> None:
+        super().__init__(save_dir=save_dir)
+        self.df = df.copy()
+        self.e_constant = e_constant
+        self.s_ref = s_ref
+        self.test_section_area = test_section_area
+        self.clip_negative_cdsep = clip_negative_cdsep
+        self.grid_df: Optional[pd.DataFrame] = None
+        self.cl_a_df: Optional[pd.DataFrame] = None
+
+    def _reorder_solid_blockage_columns(self) -> None:
+        """
+        Reorder columns so corrected columns appear next to originals.
+        """
+        df = self.df
+        new_order = []
+        already_added = set()
+
+        for col in df.columns:
+            if col in already_added:
+                continue
+
+            new_order.append(col)
+            already_added.add(col)
+
+            corr_col = f"{col}_solid_blockage_corr"
+            if corr_col in df.columns and corr_col not in already_added:
+                new_order.append(corr_col)
+                already_added.add(corr_col)
+
+        for col in df.columns:
+            if col not in already_added:
+                new_order.append(col)
+
+        self.df = df[new_order]
+
+    def apply_solid_blockage(
+        self,
+        save_csv: bool = False,
+        filename: Optional[str] = None,
+        use_constant_e: bool = True,
+        use_e_column: bool = False,
+        e_column: str = "e",
+    ) -> pd.DataFrame:
+        """
+        Apply solid blockage correction:
+
+            V_corr = V / (1 + e)
+            coeff_corr = coeff / (1 + e)^2
+
+        Parameters
+        ----------
+        save_csv : bool
+            If True, save the corrected dataframe to CSV.
+        filename : str or None
+            Name of output CSV file.
+        use_constant_e : bool
+            If True, use self.e_constant.
+        use_e_column : bool
+            If True, use a dataframe column containing e values.
+        e_column : str
+            Name of the dataframe column containing e values.
+
+        Returns
+        -------
+        pd.DataFrame
+            Corrected dataframe.
+        """
+        df = self.df.copy()
+
+        if use_constant_e and use_e_column:
+            raise ValueError("Choose either use_constant_e=True or use_e_column=True, not both.")
+        if not use_constant_e and not use_e_column:
+            raise ValueError("Choose one source for e.")
+
+        if use_constant_e:
+            e = self.e_constant
+            df["solid_blockage_e"] = e
+        else:
+            if e_column not in df.columns:
+                raise ValueError(f"Column '{e_column}' not found in dataframe.")
+            e = df[e_column]
+
+        velocity_factor = 1.0 / (1.0 + e)
+        coefficient_factor = 1.0 / (1.0 + e) ** 2
+
+        velocity_columns = [c for c in ["V"] if c in df.columns]
+        coefficient_columns = [
+            c for c in ["CL", "CD", "CY", "CMx", "CMy", "CMz", "CYaw", "CMroll", "CMpitch", "CMyaw"]
+            if c in df.columns
+        ]
+
+        for col in velocity_columns:
+            df[f"{col}_solid_blockage_corr"] = df[col] * velocity_factor
+
+        for col in coefficient_columns:
+            df[f"{col}_solid_blockage_corr"] = df[col] * coefficient_factor
+
+        self.df = df
+        self._reorder_solid_blockage_columns()
+
+        if save_csv:
+            save_name = filename or "tailOff_solid_blockage_corrected.csv"
+            self.save_df(self.df, save_name)
+
+        return self.df
+
+
+    def build_alpha_slice_grid_by_velocity(
+        self,
+        coeff_cols=None,
+        anchor_aoa_vals=(0.0, 5.0, 10.0),
+        save_csv: bool = False,
+        filename: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Build a full AoA_round / AoS_round grid for each V_round using the available
+        AoS sweeps at fixed AoA as anchor slices.
+
+        Main idea
+        ---------
+        For each V_round and each coefficient:
+        1. Use measured values where available.
+        2. Use fixed-AoA AoS sweeps (e.g. AoA = 0, 5, 10) as anchor slices.
+        3. For a target (AoA_round, AoS_round), interpolate in AoA between anchor
+        slice values at that same AoS_round.
+        4. If the target AoA lies outside the anchor range but at least two anchor
+        slices exist, do linear extrapolation in AoA.
+        5. If fewer than two usable anchor values are available for a target point,
+        leave it unresolved (NaN).
+
+        Parameters
+        ----------
+        coeff_cols : list[str] or None
+            Coefficient columns to reconstruct. If None, chooses available corrected
+            coefficient columns automatically.
+        anchor_aoa_vals : tuple[float, ...]
+            Preferred AoA slices to use as anchor AoS sweeps.
+            Example: (0.0, 5.0, 10.0)
+        save_csv : bool
+            If True, save the resulting grid.
+        filename : str or None
+            Output CSV filename.
+
+        Returns
+        -------
+        pd.DataFrame
+            Grid containing:
+            - V_round
+            - AoA_round
+            - AoS_round
+            - case_available
+            - source_type
+            - reconstructed coefficient columns
+        """
+        df = self.df.copy()
+
+        # --------------------------------------------------------
+        # Ensure rounded indexing columns exist
+        # --------------------------------------------------------
+        if "AoA_round" not in df.columns:
+            if "AoA" not in df.columns:
+                raise ValueError("Need either 'AoA_round' or 'AoA' in dataframe.")
+            df["AoA_round"] = self.round_to_half(df["AoA"])
+
+        if "AoS_round" not in df.columns:
+            if "AoS" not in df.columns:
+                raise ValueError("Need either 'AoS_round' or 'AoS' in dataframe.")
+            df["AoS_round"] = self.round_to_half(df["AoS"])
+
+        if "V_round" not in df.columns:
+            if "V_solid_blockage_corr" in df.columns:
+                df["V_round"] = self.round_to_half(df["V_solid_blockage_corr"])
+            elif "V" in df.columns:
+                df["V_round"] = self.round_to_half(df["V"])
+            else:
+                raise ValueError("Need one of: 'V_round', 'V_solid_blockage_corr', or 'V'.")
+
+        # --------------------------------------------------------
+        # Default coefficient columns
+        # --------------------------------------------------------
+        if coeff_cols is None:
+            coeff_cols = [
+                c for c in [
+                    "CL_solid_blockage_corr",
+                    "CD_solid_blockage_corr",
+                    "CY_solid_blockage_corr",
+                    "CMroll_solid_blockage_corr",
+                    "CMpitch_solid_blockage_corr",
+                    "CMyaw_solid_blockage_corr",
+                    "CL",
+                    "CD",
+                    "CY",
+                    "CMroll",
+                    "CMpitch",
+                    "CMyaw",
+                ]
+                if c in df.columns
+            ]
+
+        if not coeff_cols:
+            raise ValueError("No coefficient columns found for grid construction.")
+
+        # --------------------------------------------------------
+        # Average duplicate rows per rounded case
+        # --------------------------------------------------------
+        df_avg = (
+            df.groupby(["V_round", "AoA_round", "AoS_round"], as_index=False)[coeff_cols]
+            .mean()
+        )
+
+        all_velocity_grids = []
+
+        # --------------------------------------------------------
+        # Helper: 1D interpolation / extrapolation in AoA
+        # --------------------------------------------------------
+        def interp_or_extrap_alpha(x_target: float, x_known: np.ndarray, y_known: np.ndarray):
+            """
+            Returns (value, source_type)
+            source_type in {'interp_alpha', 'extrap_alpha', 'unresolved'}
+            """
+            valid = ~(np.isnan(x_known) | np.isnan(y_known))
+            x = x_known[valid]
+            y = y_known[valid]
+
+            if len(x) < 2:
+                return np.nan, "unresolved"
+
+            order = np.argsort(x)
+            x = x[order]
+            y = y[order]
+
+            # exact hit
+            exact_mask = np.isclose(x, x_target)
+            if exact_mask.any():
+                return y[exact_mask][0], "interp_alpha"
+
+            # interpolation inside range
+            if x.min() <= x_target <= x.max():
+                return np.interp(x_target, x, y), "interp_alpha"
+
+            # linear extrapolation using nearest two points
+            if x_target < x.min():
+                x0, x1 = x[0], x[1]
+                y0, y1 = y[0], y[1]
+            else:
+                x0, x1 = x[-2], x[-1]
+                y0, y1 = y[-2], y[-1]
+
+            if np.isclose(x1, x0):
+                return np.nan, "unresolved"
+
+            slope = (y1 - y0) / (x1 - x0)
+            y_target = y0 + slope * (x_target - x0)
+            return y_target, "extrap_alpha"
+
+        # --------------------------------------------------------
+        # Build one grid per velocity
+        # --------------------------------------------------------
+        for v_val, g_v in df_avg.groupby("V_round"):
+            aoa_vals = np.sort(g_v["AoA_round"].unique())
+            aos_vals = np.sort(g_v["AoS_round"].unique())
+
+            # full AoA/AoS grid for this velocity
+            grid = pd.MultiIndex.from_product(
+                [aoa_vals, aos_vals],
+                names=["AoA_round", "AoS_round"]
+            ).to_frame(index=False)
+            grid["V_round"] = v_val
+
+            # mark measured points
+            measured_keys = g_v[["AoA_round", "AoS_round"]].copy()
+            measured_keys["case_available"] = True
+
+            grid = grid.merge(
+                measured_keys,
+                on=["AoA_round", "AoS_round"],
+                how="left"
+            )
+            grid["case_available"] = grid["case_available"].fillna(False)
+
+            # storage for source diagnostics
+            source_type_series = pd.Series(index=grid.index, dtype="object")
+
+            # measured lookup table
+            measured_lookup = g_v.set_index(["AoA_round", "AoS_round"])
+
+            # available anchor slices at this velocity
+            available_anchor_aoa = sorted(
+                a for a in anchor_aoa_vals
+                if np.isclose(g_v["AoA_round"].unique(), a).any()
+            )
+
+            if len(available_anchor_aoa) == 0:
+                raise ValueError(
+                    f"At V_round={v_val}, none of the requested anchor AoA slices "
+                    f"{anchor_aoa_vals} are available."
+                )
+
+            # for each coeff reconstruct full grid
+            for coeff in coeff_cols:
+                values = []
+                local_source = []
+
+                # create lookup: for each anchor AoA, map AoS -> coeff
+                anchor_maps = {}
+                for a_anchor in available_anchor_aoa:
+                    g_anchor = g_v[np.isclose(g_v["AoA_round"], a_anchor)][["AoS_round", coeff]].copy()
+                    g_anchor = g_anchor.dropna(subset=[coeff])
+                    anchor_maps[a_anchor] = dict(zip(g_anchor["AoS_round"], g_anchor[coeff]))
+
+                for idx, row in grid.iterrows():
+                    aoa_t = row["AoA_round"]
+                    aos_t = row["AoS_round"]
+
+                    # 1. exact measured point takes priority
+                    if (aoa_t, aos_t) in measured_lookup.index:
+                        measured_val = measured_lookup.loc[(aoa_t, aos_t), coeff]
+                        if not pd.isna(measured_val):
+                            values.append(measured_val)
+                            local_source.append("measured")
+                            continue
+
+                    # 2. gather anchor-slice values at this AoS
+                    x_known = []
+                    y_known = []
+
+                    for a_anchor in available_anchor_aoa:
+                        val = anchor_maps[a_anchor].get(aos_t, np.nan)
+                        if not pd.isna(val):
+                            x_known.append(a_anchor)
+                            y_known.append(val)
+
+                    x_known = np.asarray(x_known, dtype=float)
+                    y_known = np.asarray(y_known, dtype=float)
+
+                    val, src = interp_or_extrap_alpha(
+                        x_target=float(aoa_t),
+                        x_known=x_known,
+                        y_known=y_known
+                    )
+
+                    values.append(val)
+                    local_source.append(src)
+
+                grid[coeff] = values
+
+                # update source_type progressively:
+                # measured dominates interp/extrap, and unresolved should remain if any coeff unresolved
+                if source_type_series.isna().all():
+                    source_type_series[:] = local_source
+                else:
+                    updated = []
+                    for old, new in zip(source_type_series.tolist(), local_source):
+                        priority = {
+                            "measured": 4,
+                            "interp_alpha": 3,
+                            "extrap_alpha": 2,
+                            "unresolved": 1,
+                            None: 0,
+                            np.nan: 0,
+                        }
+                        updated.append(old if priority.get(old, 0) >= priority.get(new, 0) else new)
+                    source_type_series[:] = updated
+
+            grid["source_type"] = source_type_series.fillna("unresolved")
+
+            # nice column order
+            ordered_cols = ["V_round", "AoA_round", "AoS_round", "case_available", "source_type"]
+            ordered_cols += [c for c in coeff_cols if c in grid.columns]
+            other_cols = [c for c in grid.columns if c not in ordered_cols]
+            grid = grid[ordered_cols + other_cols]
+
+            all_velocity_grids.append(grid)
+
+        grid_df = pd.concat(all_velocity_grids, ignore_index=True)
+        self.grid_df = grid_df
+
+        if save_csv:
+            save_name = filename or "TAILOFF_grid_by_velocity_alpha_slice.csv"
+            self.save_df(grid_df, save_name)
+
+        return grid_df
+    
+
+    def compute_cl_alpha_slope_by_case(
+        self,
+        aoa_min: float,
+        aoa_max: float,
+        cl_col: str = "CL_solid_blockage_corr",
+        aoa_col: str = "AoA_round",
+        aos_col: str = "AoS_round",
+        v_col: str = "V_round",
+        min_points: int = 2,
+        save_csv: bool = False,
+        filename: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Compute CL-alpha slope for each distinct (V_round, AoS_round) case using
+        a linear fit over a specified AoA range.
+
+        Parameters
+        ----------
+        aoa_min : float
+            Lower bound of AoA range used in the fit.
+        aoa_max : float
+            Upper bound of AoA range used in the fit.
+        cl_col : str
+            Name of the CL column to fit.
+        aoa_col : str
+            Name of the AoA column to use. Usually 'AoA_round'.
+        aos_col : str
+            Name of the AoS column to group by. Usually 'AoS_round'.
+        v_col : str
+            Name of the velocity grouping column. Usually 'V_round'.
+        min_points : int
+            Minimum number of unique AoA points required to perform a fit.
+        save_csv : bool
+            If True, save the results as CSV.
+        filename : str or None
+            Output CSV filename.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per (V_round, AoS_round) case with fit diagnostics.
+        """
+        if self.grid_df is None:
+            raise ValueError("grid_df is not available. Run build_alpha_slice_grid_by_velocity() first.")
+
+        df = self.grid_df.copy()
+
+        # --------------------------------------------------------
+        # Ensure required columns exist
+        # --------------------------------------------------------
+        if aoa_col not in df.columns:
+            if aoa_col == "AoA_round" and "AoA" in df.columns:
+                df["AoA_round"] = self.round_to_half(df["AoA"])
+            else:
+                raise ValueError(f"Column '{aoa_col}' not found in dataframe.")
+
+        if aos_col not in df.columns:
+            if aos_col == "AoS_round" and "AoS" in df.columns:
+                df["AoS_round"] = self.round_to_half(df["AoS"])
+            else:
+                raise ValueError(f"Column '{aos_col}' not found in dataframe.")
+
+        if v_col not in df.columns:
+            if v_col == "V_round":
+                if "V_solid_blockage_corr" in df.columns:
+                    df["V_round"] = self.round_to_half(df["V_solid_blockage_corr"])
+                elif "V" in df.columns:
+                    df["V_round"] = self.round_to_half(df["V"])
+                else:
+                    raise ValueError(f"Column '{v_col}' not found and no fallback V column available.")
+            else:
+                raise ValueError(f"Column '{v_col}' not found in dataframe.")
+
+        self.require_columns(df, [v_col, aos_col, aoa_col, cl_col], context="compute_cl_alpha_slope_by_case")
+
+        # --------------------------------------------------------
+        # Restrict to requested AoA range
+        # --------------------------------------------------------
+        df_fit = df[(df[aoa_col] >= aoa_min) & (df[aoa_col] <= aoa_max)].copy()
+
+        results = []
+
+        # --------------------------------------------------------
+        # Fit per (V_round, AoS_round)
+        # --------------------------------------------------------
+        for (v_val, aos_val), g in df_fit.groupby([v_col, aos_col]):
+            g = g[[aoa_col, cl_col]].dropna().copy()
+
+            # Average duplicates at same AoA if needed
+            g = g.groupby(aoa_col, as_index=False)[cl_col].mean()
+
+            n_points = len(g)
+            n_unique_aoa = g[aoa_col].nunique()
+
+            if n_unique_aoa < min_points:
+                results.append({
+                    v_col: v_val,
+                    aos_col: aos_val,
+                    "aoa_min_fit": aoa_min,
+                    "aoa_max_fit": aoa_max,
+                    "n_points": n_points,
+                    "n_unique_aoa": n_unique_aoa,
+                    "cl_alpha_slope_per_deg": np.nan,
+                    "cl_at_aoa0": np.nan,
+                    "r2": np.nan,
+                    "fit_success": False,
+                })
+                continue
+
+            x = g[aoa_col].to_numpy(dtype=float)
+            y = g[cl_col].to_numpy(dtype=float)
+
+            # Linear fit: CL = intercept + slope * AoA
+            slope, intercept = np.polyfit(x, y, 1)
+            y_hat = intercept + slope * x
+
+            ss_res = np.sum((y - y_hat) ** 2)
+            ss_tot = np.sum((y - np.mean(y)) ** 2)
+            r2 = 1 - ss_res / ss_tot if ss_tot != 0 else np.nan
+
+            results.append({
+                v_col: v_val,
+                aos_col: aos_val,
+                "aoa_min_fit": aoa_min,
+                "aoa_max_fit": aoa_max,
+                "n_points": n_points,
+                "n_unique_aoa": n_unique_aoa,
+                "cl_alpha_slope_per_deg": slope,
+                "cl_at_aoa0": intercept,
+                "r2": r2,
+                "fit_success": True,
+            })
+
+        result_df = pd.DataFrame(results).sort_values([v_col, aos_col]).reset_index(drop=True)
+
+        self.cl_a_df = result_df
+
+        if save_csv:
+            save_name = filename or "tailoff_cl_alpha_slope_by_case.csv"
+            self.save_df(result_df, save_name)
+
+        return result_df

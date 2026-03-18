@@ -743,7 +743,8 @@ def build_combined_rudder_dataframe(BAL: Dict[str, Any], D: float = 0.2032) -> p
 
         df["config"] = cfg
         df["source_file"] = source_file
-        df["rudder_deg"] = parse_rudder_deflection_deg(source_file)
+        df["dR"] = parse_rudder_deflection_deg(source_file)
+        df["dE"] = 0  # Assuming a default value for dE
 
         # Requested rounded columns
         df["V_round"] = np.round(df["V"]).astype("Int64")
@@ -762,7 +763,7 @@ def build_combined_rudder_dataframe(BAL: Dict[str, Any], D: float = 0.2032) -> p
 
     combined_df = pd.concat(dfs, ignore_index=True)
 
-    sort_cols = [c for c in ["rudder_deg", "AoS_round", "AoA_round", "V_round", "run"] if c in combined_df.columns]
+    sort_cols = [c for c in ["dR", "AoS_round", "AoA_round", "V_round", "run"] if c in combined_df.columns]
     combined_df = combined_df.sort_values(sort_cols).reset_index(drop=True)
 
     return combined_df
@@ -871,7 +872,7 @@ def main():
 
     print("\nCombined dataframe preview:")
     preview_cols = [c for c in [
-        "config", "rudder_deg", "AoA", "AoA_round", "AoS", "AoS_round",
+        "config", "dR", "dE", "AoA", "AoA_round", "AoS", "AoS_round",
         "V", "V_round", "rpmWT", "J", "J_round", "CL", "CD", "CY",
         "CMroll", "CMpitch", "CMpitch25c", "CMyaw"
     ] if c in combined_df.columns]

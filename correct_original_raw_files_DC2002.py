@@ -811,24 +811,20 @@ def main():
     diskPath = Path(__file__).resolve().parent / "TAILOFF" 
     output_dir = Path(__file__).resolve().parent / "TAILOFF" / "processed_data"
 
-    # Raw files
+    # Raw wind-on measurement files
     fn_BAL = [
-        "raw_tailOff_alfa0_balance.txt",
-        "raw_tailOff_alfa0_V50_balance.txt",
-        "raw_tailOff_alfa5_betaSweep_balance.txt",
-        "raw_tailOff_alfa10_betaSweep_balance.txt",
-        "raw_tailOff_beta0_balance.txt",
-        "raw_tailOff_beta0_V50_balance.txt"       
+        "raw_rudder_0_elevator_0.txt",
+        "raw_rudder_m5_elevator_0.txt",
+        "raw_rudder_m10_elevator_0.txt",
+        "raw_rudder_m20_elevator_0.txt",
     ]
 
-    # Same zero file for each raw file
+    # Zero file associated with each raw file
     fn0 = [
-        "zer_ 20190526-141751.txt",
-        "zer_ 20190526-182543.txt",
-        "zer_ 20190526-185555.txt",
-        "zer_ 20190526-194404.txt",
-        "zer_ 20190526-174608.txt",
-        "zer_ 20190526-124742.txt"
+        "zer_ 20260227-074705.txt",
+        "zer_ 20260227-074705.txt",
+        "zer_ 20260227-074705.txt",
+        "zer_ 20260227-074705.txt",
     ]
 
     # Geometry

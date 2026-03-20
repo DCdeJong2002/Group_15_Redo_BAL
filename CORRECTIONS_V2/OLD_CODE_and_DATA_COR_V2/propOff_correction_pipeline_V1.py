@@ -1,7 +1,7 @@
 from pathlib import Path
 import pandas as pd
 
-from correction_classes import ModelOffCorrector, PropOffData, PropOnData
+from CORRECTIONS_V2.OLD_CODE_and_DATA_COR_V2.correction_classes import ModelOffCorrector, PropOffData, PropOnData
 
 
 BASE_DIR = Path(__file__).resolve().parent

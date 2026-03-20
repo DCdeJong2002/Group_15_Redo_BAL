@@ -1,8 +1,8 @@
 from pathlib import Path
 import pandas as pd
 
-from correction_classes import ModelOffCorrector, PropOffData, PropOnData, TailOffData
-from TAILOFF_correction_pipeline_FINAL import run_tailoff_workflow
+from CORRECTIONS_V2.OLD_CODE_and_DATA_COR_V2.correction_classes import ModelOffCorrector, PropOffData, PropOnData, TailOffData
+from CORRECTIONS_V2.OLD_CODE_and_DATA_COR_V2.TAILOFF_correction_pipeline_FINAL import run_tailoff_workflow
 
 save_outputs = True  # Set to False if you want to skip saving intermediate CSVs
 

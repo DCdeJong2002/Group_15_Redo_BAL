@@ -1059,7 +1059,7 @@ class BaseCorrector:
         ess_col: str = "ess",
         velocity_cols: Sequence[str] = ("V",),
         coefficient_cols: Sequence[str] = ("CL", "CD", "CYaw", "CMroll", "CMpitch", "CMyaw"),
-        suffix: str = "blockage_combined_corr",
+        suffix: str = "blockage_corr",
         save_csv: bool = False,
         filename: Optional[str] = None,
         default_filename: str = "combined_blockage_corrected.csv",

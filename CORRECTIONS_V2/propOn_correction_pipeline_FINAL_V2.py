@@ -4,6 +4,7 @@ import pandas as pd
 from correction_classes_FINAL import ModelOffCorrector, PropOnData
 from TAILOFF_correction_pipeline_FINAL_V2 import run_tailoff_workflow
 from propOff_correction_pipeline_FINAL_V2 import run_propoff_workflow
+from Plot_function import plot_propon_diagnostics
 
 def run_propon_workflow(
     save_outputs: bool = True,
@@ -267,3 +268,5 @@ if __name__ == "__main__":
         apply_tail_correction=True,
         save_directory="results_propOn_FINAL"
     )
+
+    plot_propon_diagnostics(df_final)

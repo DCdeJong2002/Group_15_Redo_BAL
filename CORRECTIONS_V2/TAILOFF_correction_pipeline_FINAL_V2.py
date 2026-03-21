@@ -10,7 +10,7 @@ def run_tailoff_workflow(save_outputs=True):
 
     modeloff = ModelOffCorrector(
         correction_csv=BASE_DIR / "INPUT_BALANCE_DATA" / "model_off_corrections_grid.csv",
-        save_dir=BASE_DIR / "results_TAILOFF"
+        save_dir=BASE_DIR / "results_TAILOFF_FINAL"
     )
 
     tail_off_raw = pd.read_csv(
@@ -26,7 +26,7 @@ def run_tailoff_workflow(save_outputs=True):
     tailoff = TailOffData(df_tail_off_modeloff)
 
     if save_outputs:
-        tailoff.set_save_directory(BASE_DIR / "results_TAILOFF")
+        tailoff.set_save_directory(BASE_DIR / "results_TAILOFF_FINAL")
 
     df_tail_off_solid = tailoff.apply_solid_blockage(
         save_csv=save_outputs,

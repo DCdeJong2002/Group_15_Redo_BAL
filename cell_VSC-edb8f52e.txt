@@ -1,0 +1,62 @@
+import matplotlib.pyplot as plt
+
+# Filter prop on J=1.6
+df_on_filtered_16 = df[
+    (df["V_round"] == 40) & 
+    (df["AoS_round"] == 0) & 
+    (df["dR"] == 0) & 
+    (df["J_round"] == 1.6)
+].sort_values("AoA_round")
+
+# Filter prop on J=2.4
+df_on_filtered_24 = df[
+    (df["V_round"] == 40) & 
+    (df["AoS_round"] == 0) & 
+    (df["dR"] == 0) & 
+    (df["J_round"] == 2.4)
+].sort_values("AoA_round")
+
+# Filter prop off
+df_off_filtered = df_prop_off[
+    (round(df_prop_off["V_FINAL"]) == 40) & 
+    (round(df_prop_off["AoS"]) == 0) & 
+    (df_prop_off["dE"] == 0) &
+    (df_prop_off["dR"] == 0)
+].sort_values("AoA")
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+ax.plot(
+    df_on_filtered_16["AoA_round"],
+    df_on_filtered_16["CMpitch_FINAL"],
+    marker="o",
+    linestyle="-",
+    label="Prop On (J = 1.6)"
+)
+
+ax.plot(
+    df_on_filtered_24["AoA_round"],
+    df_on_filtered_24["CMpitch_FINAL"],
+    marker="^",
+    linestyle="-",
+    label="Prop On (J = 2.4)"
+)
+
+ax.plot(
+    df_off_filtered["AoA"],
+    df_off_filtered["CMpitch_FINAL"],
+    marker="s",
+    linestyle="--",
+    label="Prop Off"
+)
+
+ax.set_xlabel(r"$\alpha$ (°)")
+ax.set_ylabel(r"$C_{M_{pitch}}$")
+ax.set_title(r"$C_{M_{pitch}}$ vs $\alpha$ (V = 40 m/s, AoS = 0°, $\delta_r$ = 0°)")
+ax.legend()
+ax.grid(True)
+
+plt.tight_layout()
+plt.savefig("plot_images/CMpitch_vs_alpha_V40_AoS0_rudder0.png", dpi=150)
+plt.show()
+print("Saved to plot_images/CMpitch_vs_alpha_V40_AoS0_rudder0.png")

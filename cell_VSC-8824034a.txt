@@ -1,0 +1,107 @@
+import os
+import matplotlib.pyplot as plt
+
+# Make sure output folder exists
+os.makedirs("plot_images", exist_ok=True)
+
+# -----------------------------------
+# Create rounded columns if missing
+# -----------------------------------
+if "V_round" not in df.columns:
+    df["V_round"] = df["V_FINAL"].round()
+
+if "AoS_round" not in df.columns:
+    df["AoS_round"] = df["AoS"].round()
+
+if "AoA_round" not in df.columns:
+    df["AoA_round"] = df["AoA_FINAL"].round(1)
+
+if "V_round" not in df_prop_off.columns:
+    df_prop_off["V_round"] = df_prop_off["V_FINAL"].round()
+
+if "AoS_round" not in df_prop_off.columns:
+    df_prop_off["AoS_round"] = df_prop_off["AoS"].round()
+
+if "AoA_round" not in df_prop_off.columns:
+    df_prop_off["AoA_round"] = df_prop_off["AoA_FINAL"].round(1)
+
+# -----------------------------------
+# Filter prop-on data
+# -----------------------------------
+df_filtered = df[
+    (df["V_round"] == 40) &
+    (df["AoS_round"] == 0)
+].copy()
+
+# -----------------------------------
+# Filter prop-off data
+# Here choosing dR = 0 and dE = 0
+# -----------------------------------
+df_prop_off_filtered = df_prop_off[
+    (df_prop_off["V_round"] == 40) &
+    (df_prop_off["AoS_round"] == 0) &
+    (df_prop_off["dR"] == 0) &
+    (df_prop_off["dE"] == 0)
+].copy()
+
+# Keep only prop-on groups with more than one unique AoA value
+valid_groups = (
+    df_filtered.groupby(["J_round", "dR"])["AoA_round"]
+    .nunique()
+    .reset_index()
+)
+valid_groups = valid_groups[valid_groups["AoA_round"] > 1]
+
+# Sort prop-off data by AoA
+df_prop_off_filtered = df_prop_off_filtered.sort_values("AoA_round")
+
+# -----------------------------------
+# Plot
+# -----------------------------------
+fig, ax = plt.subplots(figsize=(10, 6))
+
+# Plot all prop-on curves
+for _, row in valid_groups.iterrows():
+    j_val = row["J_round"]
+    rudder_val = row["dR"]
+
+    group = df_filtered[
+        (df_filtered["J_round"] == j_val) &
+        (df_filtered["dR"] == rudder_val)
+    ].sort_values("AoA_round")
+
+    ax.plot(
+        group["AoA_round"],
+        group["CD_FINAL"],
+        marker="o",
+        linestyle="-",
+        label=f"J={j_val}, $\\delta_r$={rudder_val}°"
+    )
+
+# Plot prop-off curve
+if not df_prop_off_filtered.empty:
+    ax.plot(
+        df_prop_off_filtered["AoA_round"],
+        df_prop_off_filtered["CD_FINAL"],
+        marker="s",
+        linestyle="--",
+        linewidth=2,
+        label="Prop-off $\\delta_r$=0°"
+    )
+else:
+    print("Warning: no matching prop-off data found.")
+
+# Labels and styling
+ax.set_xlabel(r"$\alpha$ (°)")
+ax.set_ylabel(r"$C_D$")
+ax.set_title(r"$C_D$ vs $\alpha$ (V = 40 m/s, AoS = 0°)")
+ax.legend(fontsize=8, ncol=2)
+ax.grid(True)
+
+# Save and show
+save_path = "plot_images/CD_vs_alpha_V40_AoS0_all_J_rudders_with_propoff.png"
+plt.tight_layout()
+plt.savefig(save_path, dpi=150)
+plt.show()
+
+print(f"Saved to {save_path}")

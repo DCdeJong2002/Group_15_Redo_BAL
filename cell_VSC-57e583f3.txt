@@ -1,0 +1,31 @@
+import matplotlib.pyplot as plt
+
+df_filtered = df[
+    (df["V_round"] == 40) &
+    (df["AoS_round"] == 0) &
+    (df["AoA_round"] == 2.5) &
+    (df["dR"].isin([0, -10]))
+]
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+for rudder_val, group in df_filtered.groupby("dR"):
+    group_sorted = group.sort_values("J_round")
+    ax.plot(
+        group_sorted["J_round"],
+        group_sorted["CYaw_FINAL"],
+        marker="o",
+        linestyle="-",
+        label=f"$\\delta_r$ = {rudder_val}°",
+    )
+
+ax.set_xlabel(r"$J$")
+ax.set_ylabel(r"$C_Y$")
+ax.set_title(r"$J$ vs $C_Y$ (V = 40 m/s, AoS = 0°, $\alpha$ = 2.5°, $\delta_r$ = 0° and -10°)")
+ax.legend()
+ax.grid(True)
+
+plt.tight_layout()
+plt.savefig("plot_images/J_vs_CY_V40_AoS0_AoA2.5_rudder0_m10.png", dpi=150)
+plt.show()
+print("Saved to plot_images/J_vs_CY_V40_AoS0_AoA2.5_rudder0_m10.png")

@@ -1,0 +1,99 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- Sutherland's law ---
+mu_ref = 1.716e-5  # Pa·s
+T_ref  = 273.15    # K
+S      = 110.4     # K
+
+def sutherland_viscosity(T):
+    return mu_ref * (T / T_ref)**1.5 * (T_ref + S) / (T + S)
+
+# --- Representative tunnel conditions (averaged from prop-on data) ---
+temps = [
+    290.81, 290.5, 290.63, 290.71, 290.45, 290.68, 290.57, 290.54, 290.56,
+    290.77, 290.76, 290.54, 290.61, 290.53, 290.53, 290.38, 290.77, 290.42,
+    290.82, 290.31, 290.83, 290.77, 290.83, 290.59, 290.69, 289.29, 289.89,
+    289.33, 289.37, 289.75, 289.05, 289.33, 289.45, 289.41, 289.41, 289.39,
+    289.18, 289.41, 289.48, 289.55, 289.09, 289.4,  289.11, 289.29, 289.24,
+    289.39, 289.55, 289.31, 289.75, 289.81, 289.23, 289.71, 289.86, 289.23,
+    289.85
+]
+rhos = [
+    1.2111837665772662, 1.2124162911880931, 1.211909932667162,
+    1.211564445727421,  1.2134526039979827, 1.2123845995887763,
+    1.2128315782593753, 1.213028753275484,  1.2129332677003728,
+    1.211985376693565,  1.2120390414597149, 1.2130047723183783,
+    1.2127125926478157, 1.213034532873517,  1.2130705055473072,
+    1.2136371492818563, 1.212021319675703,  1.2134939840084806,
+    1.2117650239582876, 1.2139537833203915, 1.211735336730007,
+    1.2113024600329465, 1.2110765180038419, 1.21206476484882,
+    1.2116478035619338, 1.2185471305276716, 1.2160731113350067,
+    1.2183907064735384, 1.2182343256648152, 1.2166486644737404,
+    1.2197155774698278, 1.218474990839042,  1.2179096580800357,
+    1.2180779880835713, 1.2180659507882505, 1.218162170535493,
+    1.2191672579972812, 1.2181261372648537, 1.2178195442593014,
+    1.2175010680190128, 1.219558861881395,  1.2181682287001427,
+    1.2194624456700003, 1.2186675534126223, 1.2188902649715678,
+    1.2182103230444081, 1.2175251309693753, 1.2184869752778251,
+    1.2166486644737404, 1.216432841075817,  1.2187878701265824,
+    1.216816646064224,  1.2162230099778601, 1.2187999149132185,
+    1.2162289133388524
+]
+
+T_avg   = np.mean(temps)
+rho_avg = np.mean(rhos)
+mu_avg  = sutherland_viscosity(T_avg)
+
+print(f"T_avg   = {T_avg:.3f} K")
+print(f"rho_avg = {rho_avg:.6f} kg/m³")
+print(f"mu_avg  = {mu_avg:.4e} Pa·s")
+
+# --- Wing MAC from manual ---
+c_mac = 0.165  # m
+
+# --- Filter prop-off: alpha=2.5, beta=0, rudder=0, elevator=0 ---
+df_re = df_prop_off[
+    (df_prop_off["AoA_round"] == 2.5) &
+    (df_prop_off["AoS_round"] == 0)   &
+    (df_prop_off["dR"]        == 0)   &
+    (df_prop_off["dE"]        == 0)
+].copy()
+# Keep only the first sweep (lower original row indices)
+df_re = df_re[df_re.index < 500]
+
+# Re varies through V; rho and mu are fixed representative averages
+df_re["Re"] = rho_avg * df_re["V_FINAL"] * c_mac / mu_avg
+df_re = df_re.sort_values("Re")
+
+print(df_re[["V_round", "V_FINAL", "Re", "CL_FINAL"]].to_string())
+
+# --- Plot ---
+# fig, ax = plt.subplots(figsize=(8, 5))
+# ax.plot(df_re["Re"], df_re["CL_FINAL"], marker="o", linestyle="-")
+
+# ax.set_xlabel(r"$Re = \rho_\mathrm{avg} \, V \, c_\mathrm{mac} \, / \, \mu_\mathrm{avg}$")
+# ax.set_ylabel(r"$C_L$")
+# ax.set_title(r"$C_L$ vs $Re$ (Prop-off, $\alpha=2.5°$, $\beta=0°$, $\delta_r=0°$, $\delta_e=0°$)")
+# ax.grid(True)
+# plt.tight_layout()
+# plt.savefig("plot_images/CL_vs_Re_propoff_AoA2.5.png", dpi=150)
+# plt.show()
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+ax1.plot(df_re["Re"], df_re["CL_FINAL"], marker="o", linestyle="-")
+ax1.set_xlabel(r"$Re = \rho_\mathrm{avg} \, V \, c_\mathrm{mac} \, / \, \mu_\mathrm{avg}$")
+ax1.set_ylabel(r"$C_L$")
+ax1.set_title(r"$C_L$ vs $Re$")
+ax1.grid(True)
+
+ax2.plot(df_re["Re"], df_re["CD_FINAL"], marker="o", linestyle="-")
+ax2.set_xlabel(r"$Re = \rho_\mathrm{avg} \, V \, c_\mathrm{mac} \, / \, \mu_\mathrm{avg}$")
+ax2.set_ylabel(r"$C_D$")
+ax2.set_title(r"$C_D$ vs $Re$")
+ax2.grid(True)
+
+fig.suptitle(r"Prop-off, $\alpha=2.5°$, $\beta=0°$, $\delta_r=0°$, $\delta_e=0°$")
+plt.tight_layout()
+plt.savefig("plot_images/CL_CD_vs_Re_propoff_AoA2.5.png", dpi=150)
+plt.show()

@@ -1,0 +1,26 @@
+import matplotlib.pyplot as plt
+
+df_filtered = df[(df["V_round"] == 40) & (df["AoA_round"] == 2.5) & (df["J_round"] == 2)]
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+for rudder, group in df_filtered.groupby("dR"):
+    group_sorted = group.sort_values("AoS_round")
+    ax.plot(
+        group_sorted["AoS_round"],
+        group_sorted["CMyaw_FINAL"],
+        marker="o",
+        linestyle="-",
+        label=f"$\\delta_r$ = {rudder}°",
+    )
+
+ax.set_xlabel(r"$\beta$ (°)")
+ax.set_ylabel(r"$C_{M_{yaw}}$")
+ax.set_title(r"Angle of Sideslip vs $C_{M_{yaw}}$ (V = 40 m/s, AoA = 2.5°, J = 2)")
+ax.legend()
+ax.grid(True)
+
+plt.tight_layout()
+plt.savefig("plot_images/AoS_vs_CMyaw_V40_AoA2.5_J2_all_rudders.png", dpi=150)
+plt.show()
+print("Saved to plot_images/AoS_vs_CMyaw_V40_AoA2.5_J2_all_rudders.png")

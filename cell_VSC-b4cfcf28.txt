@@ -1,0 +1,49 @@
+import matplotlib.pyplot as plt
+
+# Filter prop on
+df_on_j = df[
+    (df["V_round"] == 40) & 
+    (df["AoA_round"] == 2.5) &
+    (df["AoS_round"] == 0) &
+    (df["dR"] == 0)
+].sort_values("J_round")
+
+# Filter prop off and average
+df_off_j = df_prop_off[
+    (df_prop_off["V_round"] == 40) & 
+    (df_prop_off["AoA_round"] == 2.5) &
+    (df_prop_off["AoS_round"] == 0) &
+    (df_prop_off["dR"] == 0) &
+    (df_prop_off["dE"] == 0)
+]
+
+cmpitch_off_avg = df_off_j["CMpitch_FINAL"].mean() if not df_off_j.empty else None
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+ax.plot(
+    df_on_j["J_round"],
+    df_on_j["CMpitch_FINAL"],
+    marker="o",
+    linestyle="-",
+    label="Prop On"
+)
+
+if cmpitch_off_avg is not None:
+    ax.axhline(
+        y=cmpitch_off_avg, 
+        color='r', 
+        linestyle=':', 
+        label=f"Prop Off (avg: {cmpitch_off_avg:.4f})"
+    )
+
+ax.set_xlabel(r"$J$")
+ax.set_ylabel(r"$C_{M_{pitch}}$")
+ax.set_title(r"$C_{M_{pitch}}$ vs $J$ (V = 40 m/s, $\alpha$ = 2.5°, $\beta$ = 0°, $\delta_r$ = 0°)")
+ax.legend()
+ax.grid(True)
+
+plt.tight_layout()
+plt.savefig("plot_images/CMpitch_vs_J_V40_AoS0_AoA2.5_rudder0.png", dpi=150)
+plt.show()
+print("Saved to plot_images/CMpitch_vs_J_V40_AoS0_AoA2.5_rudder0.png")

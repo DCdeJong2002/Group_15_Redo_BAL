@@ -3,132 +3,108 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from nptdms import TdmsFile
-from scipy.signal import welch
 
 # ============================================================
-# 1. SCIENTIFIC PROCESSING (WELCH METHOD - dB/Hz)
+# 1. SCIENTIFIC PROCESSING (FOURIER SERIES AVERAGING)
 # ============================================================
 
-def calculate_smooth_acoustics(p_mic, fs):
-    """Calculates Sound Pressure Spectrum Level (SPSL) in [dB/Hz]."""
+def calculate_clean_fourier_spsl(p_mic, fs, segment_size=4096):
+    """
+    Calculates a clean SPSL [dB/Hz] line using the Fourier Series method.
+    Uses averaging to prevent 'wide noise area' while keeping an, bn math.
+    """
     p_ref = 20e-6
-    # 4096 segments for a clean line
-    freqs, psd = welch(p_mic, fs, nperseg=4096, window='hann', scaling='density')
-    spsl = 10 * np.log10(psd / (p_ref**2))
+    # Determine number of segments for averaging to get a 'single line'
+    num_segments = len(p_mic) // segment_size
+    phi_accum = np.zeros(segment_size // 2 + 1)
+    df = fs / segment_size
+    
+    for i in range(num_segments):
+        # Extract segment and remove DC offset (image_97f3e2.png: a0/2 = 0)
+        segment = p_mic[i*segment_size : (i+1)*segment_size]
+        segment = segment - np.mean(segment)
+        
+        # Fourier Transform to get an, bn
+        X = np.fft.rfft(segment)
+        an = (2.0 / segment_size) * np.real(X)
+        bn = -(2.0 / segment_size) * np.imag(X)
+        
+        # Calculate Spectral Density phi(f) (image_97f401.png)
+        phi_segment = (an**2 + bn**2) / (2.0 * df)
+        phi_accum += phi_segment
+        
+    # Ensemble Average to get the 'clean line'
+    phi_avg = phi_accum / num_segments
+    
+    # Convert to SPSL [dB/Hz] (image_97f426.png)
+    spsl = 10 * np.log10(phi_avg / (p_ref**2) + 1e-12)
+    freqs = np.fft.rfftfreq(segment_size, 1/fs)
+    
     return freqs, spsl
 
-def load_mic_data(folder_path, target_files, fs):
-    """Loads and processes specific DPN metadata files from the Mic folder."""
+def load_mic_data(folder_path, target_files, fs, D=0.2032):
+    """Processes folder and calculates Advance Ratio (J)."""
     results = []
-    if not os.path.exists(folder_path):
-        print(f"Error: Folder {folder_path} not found.")
-        return pd.DataFrame()
+    if not os.path.exists(folder_path): return pd.DataFrame()
 
     for meta_fn in target_files:
         meta_path = os.path.join(folder_path, meta_fn)
-        if not os.path.exists(meta_path):
-            continue
+        if not os.path.exists(meta_path): continue
+        
+        df_meta = pd.read_csv(meta_path, sep=',', header=None)
+        for _, row in df_meta.iterrows():
+            dpn, v_inf, aoa, rps = int(float(row[0])), float(row[6]), round(float(row[12]), 1), float(row[14])
+            j_adv = round(v_inf / (rps * D), 2) if rps > 0 else 0
             
-        try:
-            df_meta = pd.read_csv(meta_path, sep=',', header=None)
-            for _, row in df_meta.iterrows():
-                dpn = int(float(row[0]))
-                aoa = round(float(row[12]), 1)
-                rps = round(float(row[14]), 1)
-                
-                tdms_fn = f"{meta_fn[:-4]}_run{dpn}_001.tdms"
-                tdms_path = os.path.join(folder_path, tdms_fn)
-                
-                if os.path.exists(tdms_path):
-                    tdms_file = TdmsFile.read(tdms_path)
-                    group = tdms_file.groups()[0]
-                    p_mic = group.channels()[0].data
-                    
-                    freqs, spsl = calculate_smooth_acoustics(p_mic, fs)
-                    results.append({
-                        'filename': meta_fn,
-                        'aoa': aoa, 
-                        'rps': rps, 
-                        'freqs': freqs, 
-                        'spsl': spsl, 
-                        'dpn': dpn
-                    })
-        except Exception as e:
-            print(f"Error processing {meta_fn}: {e}")
+            tdms_fn = f"{meta_fn[:-4]}_run{dpn}_001.tdms"
+            tdms_path = os.path.join(folder_path, tdms_fn)
             
+            if os.path.exists(tdms_path):
+                tdms_file = TdmsFile.read(tdms_path)
+                p_mic = tdms_file.groups()[0].channels()[0].data
+                
+                freqs, spsl = calculate_clean_fourier_spsl(p_mic, fs)
+                results.append({
+                    'config': meta_fn, 'aoa': aoa, 'j_adv': j_adv, 
+                    'rps': rps, 'freqs': freqs, 'spsl': spsl, 'dpn': dpn
+                })
     return pd.DataFrame(results)
 
 # ============================================================
-# 2. MAIN EXECUTION & LINEAR PLOTTING
+# 2. MAIN EXECUTION & SWEEP ANALYSIS
 # ============================================================
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     mic_folder = os.path.join(script_dir, 'Mic')
-    fs = 51200.0
-    num_blades = 6
-    
-    # Specific files for studies
+    fs, D, num_blades = 51200.0, 0.2032, 6
     target_files = ['DPN18.txt', 'DPN19.txt', 'DPN26.txt', 'DPN27.txt']
     
-    print("Processing acoustics for linear frequency visualization...")
-    df = load_mic_data(mic_folder, target_files, fs)
+    df = load_mic_data(mic_folder, target_files, fs, D)
+    if df.empty: return
 
-    if df.empty:
-        print("No data found.")
-        return
-
-    # --- PLOT 1: RPS Sweep - RAW FREQUENCY (Constant AoA = 2.5) ---
+    # --- SWEEP 1: J Sweep (Constant AoA = 2.5°) ---
     plt.figure(figsize=(10, 5))
-    rps_data = df[(df['aoa'] == 2.5) & (df['filename'].isin(['DPN18.txt', 'DPN26.txt', 'DPN27.txt']))]
-    rps_data = rps_data.sort_values('rps')
-
-    for _, row in rps_data.iterrows():
-        # Using standard plt.plot for Linear Scale
-        plt.plot(row['freqs'], row['spsl'], label=f"RPS = {row['rps']:.1f} Hz")
+    j_data = df[df['aoa'] == 2.5].sort_values('j_adv')
+    for _, row in j_data.iterrows():
+        plt.plot(row['freqs'], row['spsl'], label=f"J = {row['j_adv']:.2f}")
     
-    plt.title("RPS Sweep: Raw Linear Frequency (Constant AoA = 2.5°)")
-    plt.xlabel("Frequency [Hz]")
-    plt.ylabel("SPSL [dB/Hz]")
-    plt.xlim([0, 4000]) # Capture first ~5 harmonics at max RPS
-    plt.ylim([0, 80])
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+    plt.title("J-Sweep: Acoustic Severity vs. Propeller Loading (AoA = 2.5°)")
+    plt.xlabel("Frequency [Hz]"); plt.ylabel("SPSL [dB/Hz]")
+    plt.xlim([0, 5000]); plt.ylim([35, 85]); plt.legend(title="Advance Ratio"); plt.grid(True, alpha=0.3)
 
-    # --- PLOT 2: RPS Sweep - NORMALIZED (Constant AoA = 2.5) ---
+    # --- SWEEP 2: AoA Sweep (Constant J ≈ 1.6) ---
     plt.figure(figsize=(10, 5))
-    for _, row in rps_data.iterrows():
-        bpf = row['rps'] * num_blades
-        plt.plot(row['freqs'] / bpf, row['spsl'], label=f"RPS = {row['rps']:.1f} Hz")
-    
-    plt.title("RPS Sweep: Normalized Linear Frequency (Constant AoA = 2.5°)")
-    plt.xlabel("Normalized Frequency [$f / f_b$]")
-    plt.ylabel("SPSL [dB/Hz]")
-    plt.axvline(1, color='red', linestyle='--', alpha=0.5, label='BPF')
-    plt.xlim([0, 6]) # Focus on 1st through 6th harmonics
-    plt.ylim([0, 80])
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-
-    # --- PLOT 3: AoA Sweep - NORMALIZED (Constant RPS ≈ 123 Hz) ---
-    plt.figure(figsize=(10, 5))
-    aoa_data = df[(abs(df['rps'] - 123.0) < 1.0) & (df['filename'].isin(['DPN18.txt', 'DPN19.txt']))]
-    aoa_data = aoa_data.sort_values('aoa')
-
+    aoa_data = df[abs(df['j_adv'] - 1.6) <= 0.05].sort_values('aoa')
     for _, row in aoa_data.iterrows():
         bpf = row['rps'] * num_blades
         plt.plot(row['freqs'] / bpf, row['spsl'], label=f"AoA = {row['aoa']:.1f}°")
     
-    plt.title("AoA Sweep: Normalized Linear Frequency (Constant RPS ≈ 123 Hz)")
-    plt.xlabel("Normalized Frequency [$f / f_b$]")
-    plt.ylabel("SPSL [dB/Hz]")
+    plt.title("AoA Sweep: Propeller-Airframe Interaction (Constant J ≈ 1.6)")
+    plt.xlabel("Normalized Frequency [$f / f_b$]"); plt.ylabel("SPSL [dB/Hz]")
     plt.axvline(1, color='red', linestyle='--', alpha=0.5, label='BPF')
-    plt.xlim([0, 6])
-    plt.ylim([0, 80])
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
+    plt.xlim([0, 6]); plt.ylim([35, 85]); plt.legend(title="Angle of Attack"); plt.grid(True, alpha=0.3)
+
     plt.show()
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()

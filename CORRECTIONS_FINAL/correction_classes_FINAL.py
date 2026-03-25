@@ -378,9 +378,9 @@ class BaseCorrector:
         df["delta_alpha_sc_deg"] = np.degrees(df["delta_alpha_sc_rad"])
 
         if "AoA" in df.columns:
-            df["AoA_streamline_curvature_corr"] = df["AoA"] + df["delta_alpha_sc_deg"]
+            df["AoA_sc_corr"] = df["AoA"] + df["delta_alpha_sc_deg"]
         else:
-            df["AoA_streamline_curvature_corr"] = df["AoA_round"] + df["delta_alpha_sc_deg"]
+            df["AoA_sc_corr"] = df["AoA_round"] + df["delta_alpha_sc_deg"]
 
         df["delta_CL_sc"] = -df["delta_alpha_sc_deg"] * df["CL_alpha_per_deg_tailoff"]
         df["delta_CMpitch_sc"] = -0.25 * df["delta_CL_sc"]
@@ -538,7 +538,7 @@ class BaseCorrector:
         df["delta_alpha_dw_rad"] = np.radians(df["delta_alpha_dw_deg"])
         df["delta_CD_dw"]        = delta * geom_factor * (df["CLw_tailoff"] ** 2)
 
-        df["AoA_downwash_corr"]              = df[aoa_source_col] + df["delta_alpha_dw_deg"]
+        df[f"{aoa_source_col}_dw_corr"]      = df[aoa_source_col] + df["delta_alpha_dw_deg"]
         df[f"{cd_source_col}_dw_corr"]       = df[cd_source_col]  + df["delta_CD_dw"]
         df["downwash_data_found"]            = df["CLw_tailoff"].notna()
 
@@ -722,7 +722,7 @@ class BaseCorrector:
         else:
             df["delta_CMpitch_tail"] = dcmpitch_dalpha * df["delta_alpha_tail_rad"]
 
-        df["AoA_tail_corr"] = df[aoa_source_col] + df["delta_alpha_tail_deg"]
+        df[f"{aoa_source_col}_tail_corr"] = df[aoa_source_col] + df["delta_alpha_tail_deg"]
         # minus sign: tail downwash reduces effective AoA -> reduces CMpitch (more negative)
         df[f"{cmpitch_source_col}_tail_corr"] = df[cmpitch_source_col] - df["delta_CMpitch_tail"]
         df["tail_correction_data_found"]      = df["CLw_tailoff"].notna()

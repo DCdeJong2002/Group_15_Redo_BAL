@@ -135,7 +135,7 @@ def run_propoff_workflow(
             filename="propOff_streamline_curvature_corrected.csv"
         )
         outputs["streamline_curvature_corrected"] = current_df.copy()
-        active_cols["AoA"]     = "AoA_streamline_curvature_corr"
+        active_cols["AoA"]     = f"{active_cols['AoA']}_sc_corr"
         active_cols["CMpitch"] = f"{active_cols['CMpitch']}_sc_corr"
 
     # ------------------------------------------------------------
@@ -150,7 +150,7 @@ def run_propoff_workflow(
             filename="propOff_downwash_corrected.csv"
         )
         outputs["downwash_corrected"] = current_df.copy()
-        active_cols["AoA"] = "AoA_downwash_corr"
+        active_cols["AoA"] = f"{active_cols['AoA']}_dw_corr"
 
     # ------------------------------------------------------------
     # Optional tail correction

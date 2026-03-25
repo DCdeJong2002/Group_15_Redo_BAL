@@ -11,7 +11,7 @@ configurations:
                      the reference lift distribution for interference
                      corrections
 
-All correction formulae follow the methodology described in the
+All correction formulae follow the methodology described in
 AE4115 Lab Manual (TU Delft), in particular Appendix B (BEM polynomial)
 and the standard AGARD / ESDU wall-correction framework.
 
@@ -47,6 +47,7 @@ Correction sequence tail-off (recommended order)
 2.  Solid-blockage factor              (compute_solid_blockage_e)
 3.  build AoA-AoS-V grid to find CLw   (build_alpha_slice_grid_by_velocity)
 4.  find CLW-alpha slopes              (compute_cl_alpha_slope_by_case)
+
 """
 
 from __future__ import annotations
@@ -62,46 +63,48 @@ pd.set_option('future.no_silent_downcasting', True)
 
 class BaseCorrector:
     """
-    Abstract base class shared by PropOffData, PropOnData, and TailOffData.
+    Abstract base class shared by :class:`PropOffData`, :class:`PropOnData`,
+    and :class:`TailOffData`.
 
     Provides
     --------
-    - Configurable output directory and CSV save helper.
-    - Required-column validation.
-    - round_to_half utility (rounds to nearest 0.5).
-    - Solid-blockage factor computation.
-    - Wake-blockage factor computation.
-    - Combined blockage correction (velocity + coefficients).
-    - Streamline-curvature correction (shared implementation).
-    - Downwash correction (shared implementation).
-    - Tail interference correction (shared implementation).
-    - Tail-off CLw lookup / merge helper.
-    - BEM-based propeller thrust computation.
-    - BEM-based thrust separation from body-frame axial force.
-    - Final-column auto-detection and renaming.
+    * Configurable output directory and CSV helper.
+    * Required-column validation.
+    * ``round_to_half`` utility (rounds to nearest 0.5).
+    * Solid-blockage factor computation.
+    * Wake-blockage factor computation.
+    * Combined blockage correction (velocity + coefficients).
+    * Streamline-curvature correction (shared implementation).
+    * Downwash correction (shared implementation).
+    * Tail interference correction (shared implementation).
+    * Tail-off CLw lookup / merge helper.
+    * BEM-based propeller thrust computation.
+    * BEM-based thrust separation from body-frame axial force.
+    * Final-column auto-detection and renaming.
 
     Tunnel / Model Constants
     -------------------------
-    All subclasses inherit the following geometric constants.
-    Override at the subclass level if needed.
+    All subclasses inherit the following geometric constants.  Override at the
+    subclass level if needed.
 
-        TUNNEL_AREA              = 2.07       m^2   wind-tunnel cross-sectional area C
-        WING_AREA                = 0.2172     m^2   wing reference area S
-        GEOM_FACTOR              = S / C            geometric blockage ratio
+    TUNNEL_AREA   : float = 2.07 m²   – wind-tunnel cross-sectional area *C*
+    WING_AREA     : float = 0.2172 m² – wing reference area *S*
+    GEOM_FACTOR   : float = S / C     – geometric blockage ratio
 
-        PROP_DIAMETER            = 0.2032     m
-        PROP_AREA                = pi/4 * D^2       single propeller disc area
-        N_PROPS                  = 2                number of propellers
+    PROP_DIAMETER : float = 0.2032 m
+    PROP_AREA     : float = π/4 · D²  – single propeller disc area
+    N_PROPS       : int   = 2         – number of propellers
 
-        DELTA_WING               = 0.1065           wing solid-angle factor delta (ESDU)
-        DELTA_TAIL               = 0.1085           tail solid-angle factor delta_t
-        TAU2_WING                = 0.045            streamline-curvature factor tau2 (wing)
-        TAU2_TAIL                = 0.8              streamline-curvature factor tau2 (tail)
+    DELTA_WING    : float = 0.1065    – wing solid-angle factor δ (ESDU)
+    DELTA_TAIL    : float = 0.1085    – tail solid-angle factor δ_t
+    TAU2_WING     : float = 0.045     – streamline-curvature factor τ₂ (wing)
+    TAU2_TAIL     : float = 0.8       – streamline-curvature factor τ₂ (tail location)
 
-        DCMPITCH_DALPHA          = -0.15676  rad^-1 pitching-moment slope dCm/dalpha of tail
+    DCMPITCH_DALPHA : float = −0.15676 rad⁻¹  – pitching-moment slope ∂Cm/∂α of the
+                                                 tail (used in tail interference)
 
-        E_SOLID_BLOCKAGE         = 0.007229438      e_sb for full configuration
-        E_SOLID_BLOCKAGE_TAILOFF = 0.006406642      e_sb for tail-off configuration
+    E_SOLID_BLOCKAGE        : float = 0.007229438  – ε_sb for full configuration
+    E_SOLID_BLOCKAGE_TAILOFF: float = 0.006406642  – ε_sb for tail-off configuration
     """
 
     # ============================================================
@@ -131,9 +134,9 @@ class BaseCorrector:
         Parameters
         ----------
         save_dir : str or Path, optional
-            Directory used for all save_df calls. Defaults to the directory
-            containing this source file. Created automatically if it does
-            not exist.
+            Directory used for all :meth:`save_df` calls.  Defaults to the
+            directory containing this source file.  Created automatically if it
+            does not exist.
         """
         if save_dir is None:
             self.save_dir = Path(__file__).resolve().parent
@@ -146,11 +149,12 @@ class BaseCorrector:
     @staticmethod
     def round_to_half(series: pd.Series) -> pd.Series:
         """
-        Round each element of series to the nearest 0.5.
+        Round each element of *series* to the nearest 0.5.
 
         Formula
         -------
-            x_rounded = round(2 * x) / 2
+        .. math::
+            x_{\\text{rounded}} = \\frac{\\text{round}(2x)}{2}
 
         Parameters
         ----------
@@ -167,7 +171,7 @@ class BaseCorrector:
     @staticmethod
     def require_columns(df: pd.DataFrame, required_cols: Sequence[str], context: str = "") -> None:
         """
-        Raise ValueError if any of required_cols are absent from df.
+        Raise :class:`ValueError` if any of *required_cols* are absent from *df*.
 
         Parameters
         ----------
@@ -190,26 +194,26 @@ class BaseCorrector:
 
     def set_save_directory(self, directory: str | Path) -> None:
         """
-        Change the output directory used by save_df.
+        Change the output directory used by :meth:`save_df`.
 
         Parameters
         ----------
         directory : str or Path
-            New directory path. Created automatically if it does not exist.
+            New directory path.  Created automatically if it does not exist.
         """
         self.save_dir = Path(directory)
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
     def save_df(self, df: pd.DataFrame, filename: str) -> Path:
         """
-        Write df to <save_dir>/<filename> as a CSV (no row index).
+        Write *df* to ``<save_dir>/<filename>`` as a headerless-index CSV.
 
         Parameters
         ----------
         df : pd.DataFrame
             Dataframe to persist.
         filename : str
-            File name (not a full path) relative to save_dir.
+            File name (not a full path) relative to :attr:`save_dir`.
 
         Returns
         -------
@@ -242,77 +246,76 @@ class BaseCorrector:
 
         The curved streamlines induced by the tunnel walls impose an effective
         camber on the model, shifting the apparent angle of attack and the
-        pitching moment. The correction references the tail-off lift
-        coefficient CLw (from tailoff.grid_df) and the tail-off CL-alpha
-        slope (from tailoff.cl_a_df).
+        pitching moment.  The correction references the tail-off lift
+        coefficient *CL_w* (from ``tailoff.grid_df``) and the tail-off
+        CL-alpha slope (from ``tailoff.cl_a_df``).
 
         Formulae
         --------
-        Induced incidence correction [radians]:
+        Induced incidence correction:
 
-            delta_alpha_sc = tau2 * delta * (S/C) * CL_w
-
-        Converted to degrees:
-
-            delta_alpha_sc_deg = delta_alpha_sc * (180 / pi)
+        .. math::
+            \\Delta\\alpha_{sc} = \\tau_2 \\, \\delta \\, \\frac{S}{C} \\, C_{L_w}
+            \\quad [\\text{radians}]
 
         Corrected angle of attack:
 
-            AoA_sc = AoA + delta_alpha_sc_deg
+        .. math::
+            \\alpha_{sc} = \\alpha + \\Delta\\alpha_{sc}
 
         Lift-coefficient correction:
 
-            delta_CL_sc = -delta_alpha_sc_deg * (dCL/dalpha)_tailoff
+        .. math::
+            \\Delta C_L^{sc} = -\\Delta\\alpha_{sc,\\deg} \\cdot
+            \\left(\\frac{\\partial C_L}{\\partial \\alpha}\\right)_{\\text{tail-off}}
 
-        Pitching-moment correction (factor 0.25 assumes aerodynamic
-        centre at quarter-chord):
+        Pitching-moment correction:
 
-            delta_CMpitch_sc = -0.25 * delta_CL_sc
+        .. math::
+            \\Delta C_m^{sc} = -0.25 \\, \\Delta C_L^{sc}
 
-        Corrected coefficients:
-
-            CL_corr = CL + delta_CL_sc
-            CM_corr = CM + delta_CMpitch_sc
+        where the factor 0.25 assumes the aerodynamic centre at the
+        quarter-chord.
 
         Parameters
         ----------
         tailoff : TailOffData
-            Reference tail-off dataset. Must have grid_df and cl_a_df
+            Reference tail-off dataset.  Must have ``grid_df`` and ``cl_a_df``
             populated before calling this method.
         tau : float, optional
-            Streamline-curvature parameter tau2. Defaults to TAU2_WING.
+            Streamline-curvature parameter τ₂.  Defaults to :attr:`TAU2_WING`.
         delta : float, optional
-            Solid-angle factor delta. Defaults to DELTA_WING.
+            Solid-angle factor δ.  Defaults to :attr:`DELTA_WING`.
         geom_factor : float, optional
-            Geometric blockage ratio S/C. Defaults to GEOM_FACTOR.
+            Geometric blockage ratio S/C.  Defaults to :attr:`GEOM_FACTOR`.
         cl_source_col : str
             Column name of the blockage-corrected lift coefficient in
-            self.df (input).
+            ``self.df`` (input).
         cm_source_col : str
-            Column name of the blockage-corrected pitching-moment
-            coefficient in self.df (input).
+            Column name of the blockage-corrected pitching-moment coefficient in
+            ``self.df`` (input).
         dataset_label : str
             Label used in error messages.
         save_csv : bool
-            If True, write the corrected dataframe to disk.
+            If ``True``, write the corrected dataframe to disk.
         filename : str, optional
             Override output file name.
         default_filename : str
-            Fallback file name when filename is None.
+            Fallback file name when *filename* is ``None``.
 
         Returns
         -------
         pd.DataFrame
-            self.df with the following new columns added:
+            ``self.df`` with the following new columns added:
 
-            - delta_alpha_sc_rad            delta_alpha_sc in radians
-            - delta_alpha_sc_deg            delta_alpha_sc in degrees
-            - AoA_streamline_curvature_corr corrected angle of attack
-            - delta_CL_sc                   CL correction
-            - delta_CMpitch_sc              CM correction
-            - {cl_source_col}_sc_corr       corrected CL
-            - {cm_source_col}_sc_corr       corrected CM
-            - streamline_curvature_data_found  boolean lookup flag
+            * ``delta_alpha_sc_rad``          – Δα_sc in radians
+            * ``delta_alpha_sc_deg``          – Δα_sc in degrees
+            * ``AoA_streamline_curvature_corr``
+            * ``delta_CL_sc``                 – ΔC_L correction
+            * ``delta_CMpitch_sc``            – ΔC_m correction
+            * ``{cl_source_col}_sc_corr``     – corrected C_L
+            * ``{cm_source_col}_sc_corr``     – corrected C_m
+            * ``streamline_curvature_data_found`` – boolean lookup flag
         """
 
         # Resolve defaults from class constants if not explicitly passed
@@ -419,64 +422,60 @@ class BaseCorrector:
 
         The finite tunnel cross-section introduces a downwash at the model
         that increases the apparent angle of attack and adds induced drag.
-        The correction uses the tail-off wing lift coefficient CLw as the
+        The correction uses the tail-off wing lift coefficient *CL_w* as the
         reference lifting load.
 
         Formulae
         --------
-        Downwash-induced incidence increment [degrees]:
+        Downwash-induced incidence increment:
 
-            delta_alpha_dw = delta * (S/C) * CL_w * 57.3
-
-        Converted to radians:
-
-            delta_alpha_dw_rad = delta_alpha_dw * (pi / 180)
+        .. math::
+            \\Delta\\alpha_{dw} = \\delta \\, \\frac{S}{C} \\, C_{L_w} \\times 57.3
+            \\quad [\\text{degrees}]
 
         Corrected angle of attack:
 
-            AoA_dw = AoA + delta_alpha_dw
+        .. math::
+            \\alpha_{dw} = \\alpha + \\Delta\\alpha_{dw}
 
         Induced-drag correction:
 
-            delta_CD_dw = delta * (S/C) * CL_w^2
-
-        Corrected drag coefficient:
-
-            CD_corr = CD + delta_CD_dw
+        .. math::
+            \\Delta C_D^{dw} = \\delta \\, \\frac{S}{C} \\, C_{L_w}^{2}
 
         Parameters
         ----------
         tailoff : TailOffData
-            Reference tail-off dataset with grid_df populated.
+            Reference tail-off dataset with ``grid_df`` populated.
         delta : float, optional
-            Solid-angle factor delta. Defaults to DELTA_WING.
+            Solid-angle factor δ.  Defaults to :attr:`DELTA_WING`.
         geom_factor : float, optional
-            Geometric blockage ratio S/C. Defaults to GEOM_FACTOR.
+            Geometric blockage ratio S/C.  Defaults to :attr:`GEOM_FACTOR`.
         aoa_source_col : str, optional
-            Column in self.df used as the angle-of-attack input. If None,
-            falls back to 'AoA' then 'AoA_round'.
+            Column in ``self.df`` used as the angle-of-attack input.  If
+            ``None``, falls back to ``"AoA"`` then ``"AoA_round"``.
         cd_source_col : str
             Column name of the blockage-corrected drag coefficient.
         dataset_label : str
             Label used in error messages.
         save_csv : bool
-            If True, write the corrected dataframe to disk.
+            If ``True``, write the corrected dataframe to disk.
         filename : str, optional
             Override output file name.
         default_filename : str
-            Fallback file name when filename is None.
+            Fallback file name when *filename* is ``None``.
 
         Returns
         -------
         pd.DataFrame
-            self.df with the following new columns added:
+            ``self.df`` with the following new columns added:
 
-            - delta_alpha_dw_deg        delta_alpha_dw in degrees
-            - delta_alpha_dw_rad        delta_alpha_dw in radians
-            - delta_CD_dw               induced-drag correction
-            - AoA_downwash_corr         corrected angle of attack
-            - {cd_source_col}_dw_corr   corrected CD
-            - downwash_data_found        boolean lookup flag
+            * ``delta_alpha_dw_deg``        – Δα_dw in degrees
+            * ``delta_alpha_dw_rad``        – Δα_dw in radians
+            * ``delta_CD_dw``               – ΔC_D induced-drag correction
+            * ``AoA_downwash_corr``         – corrected angle of attack
+            * ``{cd_source_col}_dw_corr``   – corrected C_D
+            * ``downwash_data_found``       – boolean lookup flag
         """
 
         # Resolve defaults from class constants if not explicitly passed
@@ -571,87 +570,80 @@ class BaseCorrector:
         Apply the tail-plane interference (tail-correction) correction.
 
         The tunnel-wall constraint distorts the downwash at the horizontal
-        tail, creating an error in the measured pitching moment. The
+        tail, creating an error in the measured pitching moment.  The
         correction estimates the additional incidence felt by the tail using
         the tail streamline-curvature parameter and then infers the pitching-
-        moment change via the tail pitching-moment slope.
+        moment change via the tail's pitching-moment slope.
 
         Formulae
         --------
-        Tail-induced angle-of-attack increment [radians]:
+        Tail-induced angle-of-attack increment (radians):
 
-            delta_alpha_tail = delta_t * (S/C) * CL_w * tau2_lt
+        .. math::
+            \\Delta\\alpha_{tail} = \\delta_t \\, \\frac{S}{C} \\, C_{L_w} \\, \\tau_{2,lt}
 
-        Converted to degrees:
+        In degrees:
 
-            delta_alpha_tail_deg = delta_alpha_tail * (180 / pi)
+        .. math::
+            \\Delta\\alpha_{tail,\\deg} = \\frac{180}{\\pi} \\, \\Delta\\alpha_{tail}
 
-        Pitching-moment correction:
+        Pitching-moment correction (sign convention: tail downwash reduces
+        effective incidence, making C_m more negative):
 
-            If dcmpitch_dalpha_unit == 'per_deg':
-                delta_CMpitch_tail = (dCm/dalpha) * delta_alpha_tail_deg
+        .. math::
+            \\Delta C_m^{tail} = \\frac{\\partial C_m}{\\partial \\alpha} \\,
+            \\Delta\\alpha_{tail}
 
-            If dcmpitch_dalpha_unit == 'per_rad':
-                delta_CMpitch_tail = (dCm/dalpha) * delta_alpha_tail
-
-        where dCm/dalpha defaults to DCMPITCH_DALPHA = -0.15676 rad^-1.
-
-        Sign convention: tail downwash reduces effective AoA, which
-        reduces CMpitch (makes it more negative), hence the minus sign:
-
-            CMpitch_corr = CMpitch - delta_CMpitch_tail
-
-        Corrected angle of attack:
-
-            AoA_tail_corr = AoA + delta_alpha_tail_deg
+        where *∂Cm/∂α* is supplied via *dcmpitch_dalpha* (default
+        :attr:`DCMPITCH_DALPHA` = −0.15676 rad⁻¹).
 
         Parameters
         ----------
         tailoff : TailOffData
-            Reference tail-off dataset with grid_df populated.
+            Reference tail-off dataset with ``grid_df`` populated.
         delta : float, optional
-            Tail solid-angle factor delta_t. Defaults to DELTA_TAIL.
+            Tail solid-angle factor δ_t.  Defaults to :attr:`DELTA_TAIL`.
         geom_factor : float, optional
-            Geometric blockage ratio S/C. Defaults to GEOM_FACTOR.
+            Geometric blockage ratio S/C.  Defaults to :attr:`GEOM_FACTOR`.
         tau2_lt : float, optional
-            Tail streamline-curvature parameter tau2 at the tail location.
-            Defaults to TAU2_TAIL.
+            Tail streamline-curvature parameter τ₂ at the tail location.
+            Defaults to :attr:`TAU2_TAIL`.
         dcmpitch_dalpha : float, optional
-            Pitching-moment slope dCm/dalpha of the tail.
-            Defaults to DCMPITCH_DALPHA.
-        dcmpitch_dalpha_unit : str, 'per_rad' or 'per_deg'
-            Unit of dcmpitch_dalpha. Determines whether delta_alpha_tail
-            is expressed in radians or degrees when computing delta_CMpitch.
+            Pitching-moment slope ∂Cm/∂α of the tail.
+            Defaults to :attr:`DCMPITCH_DALPHA`.
+        dcmpitch_dalpha_unit : {"per_rad", "per_deg"}
+            Unit of *dcmpitch_dalpha*.  Determines whether Δα_tail is
+            expressed in radians or degrees when computing ΔC_m.
         aoa_source_col : str, optional
-            Column in self.df used as the AoA input. Falls back to 'AoA'
-            then 'AoA_round' when None.
+            Column in ``self.df`` used as the angle-of-attack input.  Falls
+            back to ``"AoA"`` then ``"AoA_round"`` when ``None``.
         cmpitch_source_col : str
             Column name of the pitching-moment coefficient to correct.
         dataset_label : str
             Label used in error messages.
         save_csv : bool
-            If True, write the corrected dataframe to disk.
+            If ``True``, write the corrected dataframe to disk.
         filename : str, optional
             Override output file name.
         default_filename : str
-            Fallback file name when filename is None.
+            Fallback file name when *filename* is ``None``.
 
         Returns
         -------
         pd.DataFrame
-            self.df with the following new columns added:
+            ``self.df`` with the following new columns added:
 
-            - delta_alpha_tail_rad               tail AoA increment in radians
-            - delta_alpha_tail_deg               tail AoA increment in degrees
-            - delta_CMpitch_tail                 CMpitch correction
-            - AoA_tail_corr                      corrected AoA
-            - {cmpitch_source_col}_tail_corr     corrected CMpitch
-            - tail_correction_data_found         boolean lookup flag
+            * ``delta_alpha_tail_rad``                  – Δα_tail in radians
+            * ``delta_alpha_tail_deg``                  – Δα_tail in degrees
+            * ``delta_CMpitch_tail``                    – ΔC_m tail correction
+            * ``AoA_tail_corr``                         – corrected AoA
+            * ``{cmpitch_source_col}_tail_corr``        – corrected C_m
+            * ``tail_correction_data_found``            – boolean lookup flag
 
         Raises
         ------
         ValueError
-            If dcmpitch_dalpha_unit is not 'per_deg' or 'per_rad'.
+            If ``dcmpitch_dalpha_unit`` is not ``"per_deg"`` or ``"per_rad"``.
         """
 
         # Resolve defaults from class constants if not explicitly passed
@@ -723,7 +715,7 @@ class BaseCorrector:
             df["delta_CMpitch_tail"] = dcmpitch_dalpha * df["delta_alpha_tail_rad"]
 
         df["AoA_tail_corr"] = df[aoa_source_col] + df["delta_alpha_tail_deg"]
-        # minus sign: tail downwash reduces effective AoA -> reduces CMpitch (more negative)
+        # minus sign: tail downwash reduces effective AoA → reduces CMpitch (more negative)
         df[f"{cmpitch_source_col}_tail_corr"] = df[cmpitch_source_col] - df["delta_CMpitch_tail"]
         df["tail_correction_data_found"]      = df["CLw_tailoff"].notna()
 
@@ -739,18 +731,19 @@ class BaseCorrector:
     # ============================================================
     def _ensure_round_keys(self, df: pd.DataFrame, dataset_label: str = "dataset") -> pd.DataFrame:
         """
-        Guarantee that AoA_round, AoS_round, and V_round columns are present
-        in df, creating them from raw columns when absent.
+        Guarantee that ``AoA_round``, ``AoS_round``, and ``V_round`` columns
+        are present in *df*, creating them from the raw columns when absent.
 
-        Priority for velocity source:
-            1. V_round               (already exists, no-op)
-            2. V_solid_blockage_corr (preferred after solid-blockage step)
-            3. V                     (raw freestream velocity)
+        The priority for velocity is:
+
+        1. ``V_round``               (already exists – no-op)
+        2. ``V_solid_blockage_corr`` (preferred velocity after solid-blockage)
+        3. ``V``                     (raw freestream velocity)
 
         Parameters
         ----------
         df : pd.DataFrame
-            Dataframe to augment (mutated in place, not copied).
+            Dataframe to augment (a copy is **not** made – mutated in place).
         dataset_label : str
             Label used in error messages.
 
@@ -797,19 +790,20 @@ class BaseCorrector:
         context: str = "",
     ) -> pd.DataFrame:
         """
-        Left-merge the tail-off wing lift coefficient CLw_tailoff onto df
-        from tailoff.grid_df, matching on (V_round, AoA_round, AoS_round).
+        Left-merge the tail-off wing lift coefficient *CLw_tailoff* onto *df*
+        from ``tailoff.grid_df``, matching on the key triple
+        ``(V_round, AoA_round, AoS_round)``.
 
-        The source column in tailoff.grid_df is CL_solid_blockage_corr,
-        which is the blockage-corrected lift coefficient of the wing-only
-        (tail-off) configuration. Rows in df that have no matching entry
-        in the grid receive NaN.
+        The source column in ``tailoff.grid_df`` is
+        ``CL_solid_blockage_corr``, which is the blockage-corrected lift
+        coefficient of the wing-only (tail-off) configuration.  Rows in *df*
+        that have no matching entry in the grid receive ``NaN``.
 
         Parameters
         ----------
         df : pd.DataFrame
-            Dataframe to enrich. Must already contain V_round, AoA_round,
-            AoS_round.
+            Dataframe to enrich.  Must already contain
+            ``V_round``, ``AoA_round``, ``AoS_round``.
         tailoff : TailOffData
             Reference tail-off dataset.
         context : str, optional
@@ -818,13 +812,13 @@ class BaseCorrector:
         Returns
         -------
         pd.DataFrame
-            df with CLw_tailoff column appended.
+            *df* with ``CLw_tailoff`` column appended.
 
         Raises
         ------
         ValueError
-            If the post-merge dataframe does not contain CLw_tailoff,
-            indicating a column-name collision before the merge.
+            If the post-merge dataframe does not contain ``CLw_tailoff``
+            (indicating a column-name collision).
         """
         tail_grid = tailoff.grid_df.copy()
         self.require_columns(
@@ -870,38 +864,33 @@ class BaseCorrector:
         default_filename: str = "with_esb.csv",
     ) -> pd.DataFrame:
         """
-        Compute and store the solid-blockage factor e_sb.
+        Compute and store the solid-blockage factor ε_sb.
 
         The solid-blockage factor accounts for the reduction in effective
         tunnel cross-section caused by the physical volume of the model.
         Two modes are supported:
 
-        Constant mode (use_constant_e=True):
-            Uses the class-level constant E_SOLID_BLOCKAGE (or the
-            overridden value in TailOffData).
+        * **Constant** (``use_constant_e=True``): uses the class-level
+          constant :attr:`E_SOLID_BLOCKAGE` (or the overridden value in
+          :class:`TailOffData`).
+        * **Per-row** (``use_e_column=True``): reads ε_sb from a column
+          already present in ``self.df``.
 
-                e_sb = E_SOLID_BLOCKAGE   (scalar, same for all rows)
-
-        Per-row mode (use_e_column=True):
-            Reads e_sb from a column already present in self.df.
-
-                e_sb = df[e_column]
-
-        The factor is stored in output_col (default 'esb') and is
-        subsequently consumed by _apply_combined_blockage_from_e_columns.
+        The factor is stored in *output_col* (default ``"esb"``) and is
+        subsequently consumed by :meth:`_apply_combined_blockage_from_e_columns`.
 
         Parameters
         ----------
         use_constant_e : bool
-            Use the class constant E_SOLID_BLOCKAGE.
+            Use the class constant :attr:`E_SOLID_BLOCKAGE`.
         use_e_column : bool
-            Read e_sb from e_column in self.df.
+            Read ε_sb from *e_column* in ``self.df``.
         e_column : str
-            Source column name when use_e_column is True.
+            Source column name when *use_e_column* is ``True``.
         output_col : str
-            Destination column name for e_sb.
+            Destination column name for ε_sb.
         save_csv : bool
-            If True, write the updated dataframe to disk.
+            If ``True``, write the updated dataframe to disk.
         filename : str, optional
             Override output file name.
         default_filename : str
@@ -910,13 +899,13 @@ class BaseCorrector:
         Returns
         -------
         pd.DataFrame
-            self.df with output_col added.
+            ``self.df`` with *output_col* added.
 
         Raises
         ------
         ValueError
-            If both or neither of use_constant_e / use_e_column are True,
-            or if e_column is missing from the dataframe.
+            If both or neither of *use_constant_e* / *use_e_column* are
+            ``True``, or if *e_column* is missing.
         """
         if use_constant_e and use_e_column:
             raise ValueError("Choose either use_constant_e=True or use_e_column=True, not both.")
@@ -955,48 +944,55 @@ class BaseCorrector:
         default_filename: str = "with_ewb.csv",
     ) -> pd.DataFrame:
         """
-        Compute and store the wake-blockage factor e_wb.
+        Compute and store the wake-blockage factor ε_wb.
 
         The wake-blockage factor accounts for the reduction in effective
-        freestream velocity due to the momentum deficit in the model wake.
-        It is split into a zero-lift (pressure drag) term and a separated
-        flow (form drag) term.
+        freestream velocity due to the momentum deficit in the model's wake.
+        It is separated into a zero-lift (pressure drag) term and a
+        separated-flow (form drag) term.
 
         Formulae
         --------
-        Induced drag from polar fit:
+        Induced drag (from polar fit):
 
-            CDi = k * CL^2
+        .. math::
+            C_{D_i} = k \\, C_L^{2}
 
         Separated / form drag:
 
-            CDsep = CD - CD0 - CDi
-
-        Note: negative CDsep values are physically unrealistic (scatter)
-        and are clipped to zero by default.
+        .. math::
+            C_{D_{sep}} = C_D - C_{D_0} - C_{D_i}
 
         Wake-blockage factor:
 
-            e_wb = (S / (4*C)) * CD0  +  (5*S / (4*C)) * CDsep
+        .. math::
+            \\varepsilon_{wb} = \\frac{S}{4C} \\, C_{D_0}
+            + \\frac{5S}{4C} \\, C_{D_{sep}}
 
-        where S = WING_AREA and C = TUNNEL_AREA.
+        where *S* is the wing area (:attr:`WING_AREA`) and *C* is the
+        tunnel cross-sectional area (:attr:`TUNNEL_AREA`).
+
+        Note
+        ----
+        Negative values of *C_{D_{sep}}* are physically unrealistic and are
+        clipped to zero by default (``clip_negative_cdsep=True``).
 
         Parameters
         ----------
         cd0_col : str
-            Column name of the zero-lift drag coefficient CD0 (from polar fit).
+            Column name of the zero-lift drag coefficient C_D0 (from polar fit).
         cd_col : str
-            Column name of the measured drag coefficient CD.
+            Column name of the measured drag coefficient C_D.
         cl_col : str
-            Column name of the measured lift coefficient CL.
+            Column name of the measured lift coefficient C_L.
         k_col : str
-            Column name of the induced-drag factor k (from polar fit).
+            Column name of the induced-drag factor *k* (from polar fit).
         output_col : str
-            Destination column name for e_wb.
+            Destination column name for ε_wb.
         clip_negative_cdsep : bool
-            If True, clip CDsep to zero from below.
+            If ``True``, clip *C_{D_{sep}}* to zero from below.
         save_csv : bool
-            If True, write the updated dataframe to disk.
+            If ``True``, write the updated dataframe to disk.
         filename : str, optional
             Override output file name.
         default_filename : str
@@ -1005,8 +1001,8 @@ class BaseCorrector:
         Returns
         -------
         pd.DataFrame
-            self.df with intermediate columns CL2_fit, CDi_fit, CDsep_fit,
-            and output_col added.
+            ``self.df`` with intermediate columns ``CL2_fit``, ``CDi_fit``,
+            ``CDsep_fit``, and *output_col* added.
         """
         df = self.df.copy()
 
@@ -1052,58 +1048,63 @@ class BaseCorrector:
     ) -> pd.DataFrame:
         """
         Apply the combined blockage correction to velocities and aerodynamic
-        force/moment coefficients using pre-computed blockage factor columns.
+        force/moment coefficients using the pre-computed blockage factor
+        columns.
 
-        Formulae
-        --------
-        Total blockage factor (sum of selected terms):
+        The total blockage factor is:
 
-            e_total = e_sb + e_wb + e_ss
+        .. math::
+            \\varepsilon_{total} = \\varepsilon_{sb} + \\varepsilon_{wb}
+            + \\varepsilon_{ss}
 
-        Any of the three terms can be excluded via the apply_* flags.
+        where any of the three terms can be excluded via the ``apply_*``
+        flags.
 
         Corrected freestream velocity:
 
-            V_corr = V / (1 + e_total)
+        .. math::
+            V_{corr} = \\frac{V}{1 + \\varepsilon_{total}}
 
         Corrected aerodynamic coefficients:
 
-            C_corr = C / (1 + e_total)^2
+        .. math::
+            C_{corr} = \\frac{C}{(1 + \\varepsilon_{total})^{2}}
 
         Special handling for thrust coefficient
         ----------------------------------------
-        CFt_thrust_BEM is the propeller thrust coefficient that causes
-        slipstream blockage (e_ss). Correcting it with e_ss would be
+        ``CFt_thrust_BEM`` is the propeller thrust coefficient that *causes*
+        slipstream blockage (ε_ss).  Correcting it with ε_ss would be
         circular, so it always receives solid + wake blockage only:
 
-            CFt_corr = CFt / (1 + e_sb + e_wb)^2
+        .. math::
+            C_{F_t,\\text{corr}} = \\frac{C_{F_t}}{(1 + \\varepsilon_{sb}
+            + \\varepsilon_{wb})^{2}}
 
         Parameters
         ----------
         apply_esb : bool
-            Include solid-blockage factor e_sb in e_total.
+            Include solid-blockage factor ε_sb.
         apply_ewb : bool
-            Include wake-blockage factor e_wb in e_total.
+            Include wake-blockage factor ε_wb.
         apply_ess : bool
-            Include slipstream-blockage factor e_ss in e_total
-            (prop-on only).
+            Include slipstream-blockage factor ε_ss (prop-on only).
         esb_col : str
-            Column name for e_sb.
+            Column name for ε_sb.
         ewb_col : str
-            Column name for e_wb.
+            Column name for ε_wb.
         ess_col : str
-            Column name for e_ss.
+            Column name for ε_ss.
         velocity_cols : sequence of str
-            Velocity columns to correct. Each produces {col}_{suffix}.
+            Velocity columns to correct.  Each produces ``{col}_{suffix}``.
         coefficient_cols : sequence of str
-            Coefficient columns to correct. Each produces {col}_{suffix}.
+            Coefficient columns to correct.  Each produces ``{col}_{suffix}``.
         suffix : str
-            Suffix appended to all output column names.
+            Suffix appended to all output columns.
         cft_thrust_col : str or None
-            Column name of CFt_thrust_BEM. Set to None to skip the special
-            thrust correction.
+            Column name of ``CFt_thrust_BEM``.  Set to ``None`` to skip the
+            special thrust correction.
         save_csv : bool
-            If True, write the updated dataframe to disk.
+            If ``True``, write the updated dataframe to disk.
         filename : str, optional
             Override output file name.
         default_filename : str
@@ -1112,8 +1113,8 @@ class BaseCorrector:
         Returns
         -------
         pd.DataFrame
-            self.df with corrected velocity/coefficient columns and
-            e_total_blockage added.
+            ``self.df`` with corrected velocity/coefficient columns and
+            ``e_total_blockage`` added.
         """
         df = self.df.copy()
 
@@ -1184,61 +1185,71 @@ class BaseCorrector:
         Compute the propeller thrust force coefficient from the BEM polynomial
         (Appendix B, AE4115 Lab Manual).
 
-        Formulae
-        --------
-        BEM polynomial (per propeller) as a function of advance ratio J:
+        BEM polynomial (per propeller), expressed as a function of advance
+        ratio *J*:
 
-            CT_bem(J) = -0.0051*J^4 + 0.0959*J^3 - 0.5888*J^2 + 1.0065*J - 0.1353
+        .. math::
+            C_{T,\\text{BEM}}(J) = -0.0051\\,J^{4}
+            + 0.0959\\,J^{3}
+            - 0.5888\\,J^{2}
+            + 1.0065\\,J
+            - 0.1353
 
         Propeller rotational speed derived from the advance ratio:
 
-            n = V / (J * D)     [rev/s]
+        .. math::
+            n = \\frac{V}{J \\, D}  \\quad [\\text{rev/s}]
 
         Thrust of a single propeller:
 
-            T1 = CT_bem * rho * n^2 * D^4
+        .. math::
+            T_1 = C_{T,\\text{BEM}} \\, \\rho \\, n^2 \\, D^4
 
-        Total thrust for N propellers:
+        Total thrust (for *N* propellers):
 
-            T_total = N_props * T1
+        .. math::
+            T_{total} = N_{\\text{props}} \\cdot T_1
 
-        Thrust force coefficient referenced to wing area:
+        Thrust force coefficient (referenced to wing area):
 
-            CFt = T_total / (q * S)
+        .. math::
+            C_{F_t} = \\frac{T_{total}}{q \\, S}
 
-        Thrust loading coefficient referenced to propeller disc area:
+        Thrust loading coefficient (referenced to propeller disc area):
 
-            Tc_star = T_total / (q * S_prop)
+        .. math::
+            T_c^{*} = \\frac{T_{total}}{q \\, S_{prop}}
 
         Parameters
         ----------
         df : pd.DataFrame
             Input dataframe (not mutated; a copy is returned).
         j_col : str
-            Column name of the advance ratio J.
+            Column name of the advance ratio *J*.
         v_col : str
-            Column name of the freestream velocity V [m/s].
+            Column name of the freestream velocity *V* [m/s].
         rho_col : str
-            Column name of the air density rho [kg/m^3].
+            Column name of the air density *ρ* [kg/m³].
         q_col : str
-            Column name of the dynamic pressure q [Pa].
+            Column name of the dynamic pressure *q* [Pa].
         D : float, optional
-            Propeller diameter [m]. Defaults to PROP_DIAMETER.
+            Propeller diameter [m].  Defaults to :attr:`PROP_DIAMETER`.
         S_wing : float, optional
-            Wing reference area [m^2]. Defaults to WING_AREA.
+            Wing reference area [m²].  Defaults to :attr:`WING_AREA`.
         S_prop : float, optional
-            Single propeller disc area [m^2]. Defaults to PROP_AREA.
+            Single propeller disc area [m²].  Defaults to :attr:`PROP_AREA`.
         n_props : int, optional
-            Number of propellers. Defaults to N_PROPS.
+            Number of propellers.  Defaults to :attr:`N_PROPS`.
         output_cft_col : str
-            Column name for the output CFt_thrust_BEM.
+            Column name for the output ``CFt_thrust_BEM``.
         output_tcstar_col : str
-            Column name for the output Tc_star_BEM.
+            Column name for the output ``Tc_star_BEM``.
 
         Returns
         -------
         pd.DataFrame
-            Copy of df with CFt_thrust_BEM and Tc_star_BEM columns added.
+            Copy of *df* with ``CFt_thrust_BEM`` and ``Tc_star_BEM`` columns
+            added.
         """
         df = df.copy()
 
@@ -1289,38 +1300,44 @@ class BaseCorrector:
     ) -> pd.DataFrame:
         """
         Separate the propeller thrust contribution from the measured axial
-        body-frame force coefficient CT, yielding aerodynamic-only lift,
+        body-frame force coefficient *CT*, yielding aerodynamic-only lift,
         drag, and side-force coefficients.
 
-        Formulae
-        --------
         The measured axial coefficient contains both aerodynamic drag and
-        propeller thrust (acting in opposite directions):
+        the propeller thrust (acting in the opposite sense):
 
-            CT_measured = CD_aero - CFt_thrust
+        .. math::
+            C_{T,\\text{measured}} = C_{D,\\text{aero}} - C_{F_t,\\text{thrust}}
 
         Rearranging for the aerodynamic axial force:
 
-            CFt_aero = CT_measured + CFt_thrust_BEM
+        .. math::
+            C_{F_t,\\text{aero}} = C_{T,\\text{measured}} + C_{F_t,\\text{thrust,BEM}}
 
         Wind-axis transformation from body-frame force coefficients
-        (CN = normal, CS = side, CFt_aero = axial) to stability-axis
-        aerodynamic coefficients, where alpha = AoA [rad] and
-        beta = AoS [rad]:
+        (*C_N* = normal, *C_S* = side, *C_{Ft,aero}* = axial) to
+        stability-axis aerodynamic coefficients:
 
         Aerodynamic drag:
 
-            CD = (CN*sin(alpha) + CFt_aero*cos(alpha)) * cos(beta)
-                 + CS*sin(beta)
+        .. math::
+            C_D = \\bigl(C_N \\sin\\alpha + C_{F_t,\\text{aero}} \\cos\\alpha\\bigr)
+            \\cos\\beta + C_S \\sin\\beta
 
         Aerodynamic lift:
 
-            CL = CN*cos(alpha) - CFt_aero*sin(alpha)
+        .. math::
+            C_L = C_N \\cos\\alpha - C_{F_t,\\text{aero}} \\sin\\alpha
 
         Aerodynamic yaw force:
 
-            CYaw = -(CN*sin(alpha) + CFt_aero*cos(alpha)) * sin(beta)
-                   + CS*cos(beta)
+        .. math::
+            C_{Y,\\text{aero}} = -\\bigl(C_N \\sin\\alpha
+            + C_{F_t,\\text{aero}} \\cos\\alpha\\bigr) \\sin\\beta
+            + C_S \\cos\\beta
+
+        where α is the angle of attack and β is the sideslip angle (both in
+        radians).
 
         Parameters
         ----------
@@ -1331,34 +1348,36 @@ class BaseCorrector:
         aos_col_on : str
             Column name of the sideslip angle [degrees].
         S_wing : float, optional
-            Wing reference area [m^2]. Defaults to WING_AREA.
+            Wing reference area [m²].  Defaults to :attr:`WING_AREA`.
         S_prop : float, optional
-            Single propeller disc area [m^2]. Defaults to PROP_AREA.
+            Single propeller disc area [m²].  Defaults to :attr:`PROP_AREA`.
         D : float, optional
-            Propeller diameter [m]. Defaults to PROP_DIAMETER.
+            Propeller diameter [m].  Defaults to :attr:`PROP_DIAMETER`.
         n_props : int, optional
-            Number of propellers. Defaults to N_PROPS.
+            Number of propellers.  Defaults to :attr:`N_PROPS`.
         recompute_cd : bool
-            If True, compute and store CD_aero_BEM.
+            If ``True``, compute and store ``CD_aero_BEM``.
         recompute_cl : bool
-            If True, compute and store CL_aero_BEM.
+            If ``True``, compute and store ``CL_aero_BEM``.
         recompute_cyaw : bool
-            If True, compute and store CYaw_aero_BEM.
+            If ``True``, compute and store ``CYaw_aero_BEM``.
 
         Returns
         -------
         pd.DataFrame
-            self.df with the following new columns:
+            ``self.df`` with the following new columns:
 
             Always added:
-            - CFt_thrust_BEM    propeller thrust force coefficient
-            - Tc_star_BEM       thrust loading coefficient T/(q * S_prop)
-            - CFt_aero_BEM      aerodynamic axial force coefficient
 
-            Conditional (controlled by recompute_* flags):
-            - CD_aero_BEM
-            - CL_aero_BEM
-            - CYaw_aero_BEM
+            * ``CFt_thrust_BEM``  – propeller thrust force coefficient
+            * ``Tc_star_BEM``     – thrust loading coefficient T/(q S_prop)
+            * ``CFt_aero_BEM``    – aerodynamic axial force coefficient
+
+            Conditional (controlled by ``recompute_*`` flags):
+
+            * ``CD_aero_BEM``
+            * ``CL_aero_BEM``
+            * ``CYaw_aero_BEM``
         """
         df = self.df.copy()
 
@@ -1385,7 +1404,7 @@ class BaseCorrector:
         ct_on   = pd.to_numeric(df[ct_col_on],        errors="coerce")
         cft_bem = pd.to_numeric(df["CFt_thrust_BEM"], errors="coerce")
 
-        # CT_measured = aero_drag - thrust  ->  CFt_aero = CT_measured + thrust
+        # CT_measured = aero_drag - thrust  →  CFt_aero = CT_measured + thrust
         df["CFt_aero_BEM"] = ct_on + cft_bem
 
         CFn      = pd.to_numeric(df["CN"], errors="coerce")
@@ -1424,39 +1443,39 @@ class BaseCorrector:
     ) -> pd.DataFrame:
         """
         Detect the most fully corrected column for each base aerodynamic
-        quantity and rename it with final_suffix (default '_FINAL').
+        quantity and rename it with *final_suffix* (default ``"_FINAL"``).
 
         Detection logic
         ---------------
-        For each base name (e.g. 'CD'):
+        For each base name (e.g. ``"CD"``):
 
         1. Collect all columns whose name starts with that base.
-        2. Among those, prefer columns whose name contains 'corr'
+        2. Among those, prefer columns whose name contains ``"corr"``
            (indicating at least one correction has been applied).
-        3. Among the filtered candidates, select the one with the most
-           underscore-separated parts, i.e. the column that has gone
+        3. Among the filtered candidates, select the one with the **most
+           underscore-separated parts** — i.e., the column that has gone
            through the most correction steps.
-        4. Rename it to {base}_FINAL.
+        4. Rename it to ``{base}_FINAL``.
 
         Parameters
         ----------
         base_cols : tuple of str
             Base column names to search for.
         final_suffix : str
-            Suffix appended to each selected column name.
+            Suffix appended to each selected column.
         save_csv : bool
-            If True, write the renamed dataframe to disk.
+            If ``True``, write the renamed dataframe to disk.
         filename : str
             Output file name.
         save_directory : str or Path, optional
-            Override the output directory. Falls back to save_dir.
+            Override the output directory.  Falls back to :attr:`save_dir`.
         verbose : bool
-            If True, print the detected rename mapping to stdout.
+            If ``True``, print the detected rename mapping to stdout.
 
         Returns
         -------
         pd.DataFrame
-            self.df with selected columns renamed to {base}_FINAL.
+            ``self.df`` with selected columns renamed to ``{base}_FINAL``.
         """
         df = self.df.copy()
         rename_dict = {}
@@ -1507,21 +1526,20 @@ class ModelOffCorrector(BaseCorrector):
 
     The model-off correction removes the aerodynamic contribution of the
     model support structure (sting, struts, etc.) that was measured in a
-    separate run with the model absent. The correction subtracts the tare
-    coefficients, looked up by (AoA_round, AoS_round), from the
-    corresponding coefficients in the measured dataframe:
-
-        C_corrected = C_measured - C_tare
+    separate run with the model absent.  The correction is applied by
+    subtracting the tare coefficients, looked up by ``(AoA_round, AoS_round)``,
+    from the corresponding coefficients in the measured dataframe.
 
     Parameters
     ----------
     correction_csv : str or Path
-        Path to the CSV file containing the model-off tare grid. Must
-        include columns: AoA_round, AoS_round, CD, CYaw, CL, CMroll,
-        CMpitch, CMyaw.
+        Path to the CSV file containing the model-off tare grid.  Must
+        include columns ``AoA_round``, ``AoS_round``, ``CD``, ``CYaw``,
+        ``CL``, ``CMroll``, ``CMpitch``, ``CMyaw``.
     apply_cmpitch_to_25c : bool
-        If True (default), also subtract the pitching-moment tare from
-        the CMpitch25c column (moment referenced to 25% chord).
+        If ``True`` (default), also subtract the pitching-moment tare from the
+        ``CMpitch25c`` column (moment transferred to the 25 % chord reference
+        point).
     save_dir : str or Path, optional
         Output directory for saved files.
     """
@@ -1539,18 +1557,20 @@ class ModelOffCorrector(BaseCorrector):
 
     def _load_correction_grid(self) -> pd.DataFrame:
         """
-        Load and validate the model-off correction grid from correction_csv.
+        Load and validate the model-off correction grid from
+        :attr:`correction_csv`.
 
-        The grid is deduplicated on (AoA_round, AoS_round) and coefficient
-        columns are renamed with the _modeloff suffix to avoid collisions
-        during the subsequent merge.
+        The grid is deduplicated on ``(AoA_round, AoS_round)`` and the
+        coefficient columns are renamed with the ``_modeloff`` suffix for
+        clarity during the subsequent merge.
 
         Returns
         -------
         pd.DataFrame
             Cleaned tare grid with columns:
-            AoA_round, AoS_round, CD_modeloff, CYaw_modeloff, CL_modeloff,
-            CMroll_modeloff, CMpitch_modeloff, CMyaw_modeloff.
+            ``AoA_round``, ``AoS_round``,
+            ``CD_modeloff``, ``CYaw_modeloff``, ``CL_modeloff``,
+            ``CMroll_modeloff``, ``CMpitch_modeloff``, ``CMyaw_modeloff``.
 
         Raises
         ------
@@ -1586,44 +1606,45 @@ class ModelOffCorrector(BaseCorrector):
         cmpitch25c_column: Optional[str] = None,
     ) -> pd.DataFrame:
         """
-        Apply the model-off tare correction to df.
+        Apply the model-off tare correction to *df*.
 
-        For each canonical coefficient C, the corrected value is:
+        For each canonical coefficient *C*, the corrected value is:
 
-            C_corrected = C_measured - C_tare
+        .. math::
+            C_{\\text{corrected}} = C_{\\text{measured}} - C_{\\text{tare}}
 
-        where C_tare is the value from the model-off grid matched by
-        (AoA_round, AoS_round). If apply_cmpitch_to_25c is True, the
-        same subtraction is applied to the CMpitch25c column.
+        where *C_tare* is the value from the model-off grid matched by
+        ``(AoA_round, AoS_round)``.  If ``apply_cmpitch_to_25c`` is ``True``,
+        the same subtraction is applied to the ``CMpitch25c`` column.
 
-        Original uncorrected values are preserved in {col}_uncorrected
+        Original uncorrected values are preserved in ``{col}_uncorrected``
         columns.
 
         Parameters
         ----------
         df : pd.DataFrame
-            Measured dataframe to correct. Should contain the coefficient
-            columns to be corrected, plus either (AoA_round, AoS_round)
-            or (AoA, AoS) which are rounded internally.
+            Measured dataframe to correct.  Should contain the coefficient
+            columns to be corrected, plus either ``(AoA_round, AoS_round)``
+            or ``(AoA, AoS)`` (which are rounded internally).
         save_csv : bool
-            If True, write the corrected dataframe to disk.
+            If ``True``, write the corrected dataframe to disk.
         filename : str, optional
             Override output file name.
         source_columns : dict[str, str], optional
-            Mapping {canonical_name: actual_column_name} for cases where
-            coefficient columns have non-standard names. Canonical names
-            are 'CD', 'CYaw', 'CL', 'CMroll', 'CMpitch', 'CMyaw'. If
-            None, canonical names are used directly.
+            Mapping ``{canonical_name: actual_column_name}`` for cases where
+            the coefficient columns have non-standard names.  Canonical names
+            are ``"CD"``, ``"CYaw"``, ``"CL"``, ``"CMroll"``, ``"CMpitch"``,
+            ``"CMyaw"``.  If ``None``, the canonical names are used directly.
         cmpitch25c_column : str, optional
-            Column name of the pitching moment at 25% chord. Defaults
-            to 'CMpitch25c'.
+            Column name of the pitching moment at the 25 % chord.  Defaults
+            to ``"CMpitch25c"``.
 
         Returns
         -------
         pd.DataFrame
-            Corrected dataframe with {col}_uncorrected backup columns and
-            a modeloff_correction_found boolean column indicating whether
-            a tare entry was found for each row.
+            Corrected dataframe with ``{col}_uncorrected`` backup columns and
+            a ``modeloff_correction_found`` boolean column indicating whether a
+            tare entry was found for each row.
         """
         correction_map = {
             "CD":      "CD_modeloff",
@@ -1689,26 +1710,26 @@ class PropOffData(BaseCorrector):
     Container and correction pipeline for propeller-off (clean-wing,
     power-off) wind-tunnel measurements.
 
-    This class stores the raw/partially-processed dataframe in self.df
-    and provides methods to apply the full sequence of wall corrections
-    in the recommended order:
+    This class stores the raw/partially-processed dataframe in ``self.df``
+    and provides methods to apply the full sequence of wall corrections in
+    the recommended order:
 
-    1.  fit_cd_polar                        fit CD = CD0 + k*CL^2
-    2.  compute_solid_blockage_e            compute e_sb
-    3.  compute_wake_blockage_e             compute e_wb
-    4.  apply_blockage_correction           apply combined blockage
-    5.  apply_streamline_curvature_correction
-    6.  apply_downwash_correction
-    7.  apply_tail_correction
+    1.  :meth:`fit_cd_polar`                       – fit C_D = C_D0 + k C_L²
+    2.  :meth:`compute_solid_blockage_e`           – compute ε_sb
+    3.  :meth:`compute_wake_blockage_e`            – compute ε_wb
+    4.  :meth:`apply_blockage_correction`          – apply combined blockage
+    5.  :meth:`apply_streamline_curvature_correction`
+    6.  :meth:`apply_downwash_correction`
+    7.  :meth:`apply_tail_correction`
 
     Parameters
     ----------
     df : pd.DataFrame
         Raw measurement dataframe.
     clip_negative_cdsep : bool
-        If True (default), clip CDsep to zero when computing the
-        wake-blockage factor. Negative values are physically unrealistic
-        and arise from measurement scatter.
+        If ``True`` (default), clip the separated drag *C_{D_{sep}}* to zero
+        when computing the wake-blockage factor.  Negative values are
+        physically unrealistic and arise from measurement scatter.
     save_dir : str or Path, optional
         Output directory for all CSV exports.
     """
@@ -1727,27 +1748,27 @@ class PropOffData(BaseCorrector):
     @staticmethod
     def _linear_fit(x: np.ndarray, y: np.ndarray) -> Tuple[float, float, np.ndarray, float]:
         """
-        Fit the linear model y = intercept + slope * x using ordinary
+        Fit the linear model ``y = intercept + slope * x`` using ordinary
         least squares.
 
         Parameters
         ----------
         x : np.ndarray
-            Independent variable (e.g. CL^2).
+            Independent variable (e.g. C_L²).
         y : np.ndarray
-            Dependent variable (e.g. CD).
+            Dependent variable (e.g. C_D).
 
         Returns
         -------
         intercept : float
-            Fitted intercept (CD0 in a drag-polar context).
+            Fitted intercept (C_D0 in a drag-polar context).
         slope : float
-            Fitted slope (k in a drag-polar context).
+            Fitted slope (*k* in a drag-polar context).
         y_hat : np.ndarray
-            Predicted values at each x.
+            Predicted values at each *x*.
         r2 : float
-            Coefficient of determination R^2. Returns nan if total sum
-            of squares is zero.
+            Coefficient of determination R².  Returns ``nan`` if total sum of
+            squares is zero.
         """
         slope, intercept = np.polyfit(x, y, 1)
         y_hat  = intercept + slope * x
@@ -1770,39 +1791,33 @@ class PropOffData(BaseCorrector):
         """
         Apply the streamline-curvature correction to the prop-off dataset.
 
-        Delegates to BaseCorrector._apply_streamline_curvature_common.
-        See that method for the full formula description.
-
-        Formulae (summary)
-        ------------------
-            delta_alpha_sc = tau2 * delta * (S/C) * CL_w        [rad]
-            AoA_sc         = AoA + delta_alpha_sc_deg
-            delta_CL_sc    = -delta_alpha_sc_deg * (dCL/dalpha)_tailoff
-            delta_CM_sc    = -0.25 * delta_CL_sc
+        Delegates to :meth:`BaseCorrector._apply_streamline_curvature_common`.
+        See that method for the full description of the correction formulae.
 
         Parameters
         ----------
         tailoff : TailOffData
-            Reference tail-off dataset with grid_df and cl_a_df populated.
+            Reference tail-off dataset with ``grid_df`` and ``cl_a_df``
+            populated.
         tau : float, optional
-            Streamline-curvature parameter tau2. Defaults to TAU2_WING.
+            Streamline-curvature parameter τ₂.  Defaults to :attr:`TAU2_WING`.
         delta : float, optional
-            Solid-angle factor delta. Defaults to DELTA_WING.
+            Solid-angle factor δ.  Defaults to :attr:`DELTA_WING`.
         geom_factor : float, optional
-            Geometric blockage ratio S/C. Defaults to GEOM_FACTOR.
+            Geometric blockage ratio S/C.  Defaults to :attr:`GEOM_FACTOR`.
         cl_source_col : str
             Input lift-coefficient column (post blockage correction).
         cm_source_col : str
             Input pitching-moment column (post blockage correction).
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            Updated self.df.
+            Updated ``self.df``.
         """
         tau         = tau         if tau         is not None else self.TAU2_WING
         delta       = delta       if delta       is not None else self.DELTA_WING
@@ -1827,37 +1842,31 @@ class PropOffData(BaseCorrector):
         """
         Apply the downwash correction to the prop-off dataset.
 
-        Delegates to BaseCorrector._apply_downwash_correction_common.
-        See that method for the full formula description.
-
-        Formulae (summary)
-        ------------------
-            delta_alpha_dw = delta * (S/C) * CL_w * 57.3        [deg]
-            AoA_dw         = AoA + delta_alpha_dw
-            delta_CD_dw    = delta * (S/C) * CL_w^2
+        Delegates to :meth:`BaseCorrector._apply_downwash_correction_common`.
+        See that method for the full description of the correction formulae.
 
         Parameters
         ----------
         tailoff : TailOffData
-            Reference tail-off dataset with grid_df populated.
+            Reference tail-off dataset with ``grid_df`` populated.
         delta : float, optional
-            Solid-angle factor delta. Defaults to DELTA_WING.
+            Solid-angle factor δ.  Defaults to :attr:`DELTA_WING`.
         geom_factor : float, optional
-            Geometric blockage ratio S/C. Defaults to GEOM_FACTOR.
+            Geometric blockage ratio S/C.  Defaults to :attr:`GEOM_FACTOR`.
         aoa_source_col : str, optional
-            AoA input column. Defaults to 'AoA_streamline_curvature_corr'
-            so the streamline-curvature-corrected AoA is used as input.
+            AoA input column.  Defaults to ``"AoA_streamline_curvature_corr"``
+            so that the AoA corrected for streamline curvature is used as input.
         cd_source_col : str
             Drag-coefficient input column.
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            Updated self.df.
+            Updated ``self.df``.
         """
         delta       = delta       if delta       is not None else self.DELTA_WING
         geom_factor = geom_factor if geom_factor is not None else self.GEOM_FACTOR
@@ -1884,43 +1893,38 @@ class PropOffData(BaseCorrector):
         """
         Apply the tail-plane interference correction to the prop-off dataset.
 
-        Delegates to BaseCorrector._apply_tail_correction_common.
-        See that method for the full formula description.
-
-        Formulae (summary)
-        ------------------
-            delta_alpha_tail = delta_t * (S/C) * CL_w * tau2_lt  [rad]
-            delta_CMpitch    = (dCm/dalpha) * delta_alpha_tail
-            CMpitch_corr     = CMpitch - delta_CMpitch
+        Delegates to :meth:`BaseCorrector._apply_tail_correction_common`.
+        See that method for the full description of the correction formulae.
 
         Parameters
         ----------
         tailoff : TailOffData
-            Reference tail-off dataset with grid_df populated.
+            Reference tail-off dataset with ``grid_df`` populated.
         delta : float, optional
-            Tail solid-angle factor delta_t. Defaults to DELTA_TAIL.
+            Tail solid-angle factor δ_t.  Defaults to :attr:`DELTA_TAIL`.
         geom_factor : float, optional
-            Geometric blockage ratio S/C. Defaults to GEOM_FACTOR.
+            Geometric blockage ratio S/C.  Defaults to :attr:`GEOM_FACTOR`.
         tau2_lt : float, optional
-            Tail streamline-curvature parameter tau2. Defaults to TAU2_TAIL.
+            Tail streamline-curvature parameter τ₂.  Defaults to
+            :attr:`TAU2_TAIL`.
         dcmpitch_dalpha : float, optional
-            Tail pitching-moment slope dCm/dalpha. Defaults to
-            DCMPITCH_DALPHA = -0.15676 rad^-1.
-        dcmpitch_dalpha_unit : str, 'per_rad' or 'per_deg'
-            Unit of dcmpitch_dalpha.
+            Tail pitching-moment slope ∂Cm/∂α.  Defaults to
+            :attr:`DCMPITCH_DALPHA`.
+        dcmpitch_dalpha_unit : {"per_rad", "per_deg"}
+            Unit of *dcmpitch_dalpha*.
         aoa_source_col : str, optional
-            AoA input column. Falls back to 'AoA' then 'AoA_round'.
+            AoA input column.  Falls back to ``"AoA"`` then ``"AoA_round"``.
         cmpitch_source_col : str
             Pitching-moment input column.
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            Updated self.df.
+            Updated ``self.df``.
         """
         delta           = delta           if delta           is not None else self.DELTA_TAIL
         geom_factor     = geom_factor     if geom_factor     is not None else self.GEOM_FACTOR
@@ -1948,27 +1952,29 @@ class PropOffData(BaseCorrector):
         """
         Fit the parabolic drag polar for each test condition.
 
-        For each unique combination of (V_round, AoS_round, dE, dR),
-        fits the standard drag polar:
+        For each unique combination of ``(V_round, AoS_round, dE, dR)``,
+        fits:
 
-            CD = CD0 + k * CL^2
+        .. math::
+            C_D = C_{D_0} + k \\, C_L^{2}
 
-        using ordinary least squares on CL^2 vs CD. Groups with fewer
-        than min_aoa_points unique AoA values are skipped and flagged
-        with fit_used = False.
+        using ordinary least squares on *C_L²* vs *C_D*.  Groups with fewer
+        than *min_aoa_points* unique AoA values are skipped.
 
-        The fitted coefficients are stored back in self.df (per row) and
-        in a compact summary table self.fit_df (one row per condition).
+        The fitted coefficients are stored both back in ``self.df`` (per row)
+        and in a compact summary table ``self.fit_df``
+        (one row per condition).
 
         Parameters
         ----------
         save_csv : bool
-            If True, write the per-row result to filename and, optionally,
-            the summary fit table to fit_params_filename.
+            If ``True``, write the per-row result to *filename* and,
+            optionally, the summary fit table to *fit_params_filename*.
         filename : str, optional
             Override output file name for the per-row dataframe.
         fit_params_filename : str, optional
-            File name for the summary fit table. If None, not written.
+            File name for the summary fit table.  If ``None``, the summary is
+            not written.
         v_col : str
             Velocity column name.
         cl_col : str
@@ -1981,14 +1987,14 @@ class PropOffData(BaseCorrector):
         Returns
         -------
         pd.DataFrame
-            self.df with new columns:
+            ``self.df`` with new columns:
 
-            - fit_used      boolean flag indicating fit was performed
-            - CD0_fit       fitted zero-lift drag coefficient
-            - k_fit         fitted induced-drag factor
-            - R2_fit        coefficient of determination R^2
-            - CD_fit_pred   predicted CD from fit
-            - CDi_fit       induced drag component k * CL^2
+            * ``fit_used``    – boolean flag
+            * ``CD0_fit``     – fitted zero-lift drag coefficient C_D0
+            * ``k_fit``       – fitted induced-drag factor *k*
+            * ``R2_fit``      – coefficient of determination R²
+            * ``CD_fit_pred`` – predicted C_D from fit
+            * ``CDi_fit``     – induced drag component k·C_L²
         """
         df = self.df.copy()
         self.require_columns(df, ["AoA", "AoS", "dE", "dR", v_col, cl_col, cd_col],
@@ -2050,35 +2056,32 @@ class PropOffData(BaseCorrector):
         output_col: str = "esb",
     ) -> pd.DataFrame:
         """
-        Compute and store the solid-blockage factor e_sb for the prop-off
+        Compute and store the solid-blockage factor ε_sb for the prop-off
         configuration.
 
-        Delegates to BaseCorrector._compute_solid_blockage_e_common using
-        the class constant E_SOLID_BLOCKAGE = 0.007229438.
-
-        Formula (constant mode):
-
-            e_sb = 0.007229438   (same for all rows)
+        Delegates to
+        :meth:`BaseCorrector._compute_solid_blockage_e_common` using the
+        class constant :attr:`E_SOLID_BLOCKAGE` = 0.007229438.
 
         Parameters
         ----------
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
         use_constant_e : bool
-            Use the class constant (default True).
+            Use the class constant (default ``True``).
         use_e_column : bool
-            Use a per-row value from e_column instead.
+            Use a per-row value from *e_column*.
         e_column : str
-            Source column when use_e_column is True.
+            Source column when *use_e_column* is ``True``.
         output_col : str
-            Destination column name for e_sb.
+            Destination column name for ε_sb.
 
         Returns
         -------
         pd.DataFrame
-            self.df with output_col added.
+            ``self.df`` with *output_col* added.
         """
         return self._compute_solid_blockage_e_common(
             use_constant_e=use_constant_e, use_e_column=use_e_column,
@@ -2098,38 +2101,34 @@ class PropOffData(BaseCorrector):
         filename: Optional[str] = None,
     ) -> pd.DataFrame:
         """
-        Compute and store the wake-blockage factor e_wb for the prop-off
+        Compute and store the wake-blockage factor ε_wb for the prop-off
         configuration.
 
-        Delegates to BaseCorrector._compute_wake_blockage_e_common.
-
-        Formulae
-        --------
-            CDi    = k * CL^2
-            CDsep  = CD - CD0 - CDi          (clipped to >= 0)
-            e_wb   = (S/(4*C))*CD0 + (5*S/(4*C))*CDsep
+        Delegates to
+        :meth:`BaseCorrector._compute_wake_blockage_e_common`.
+        See that method for the full formula description.
 
         Parameters
         ----------
         cd0_col : str
-            Zero-lift drag coefficient column (from fit_cd_polar).
+            Zero-lift drag coefficient column (from :meth:`fit_cd_polar`).
         cd_col : str
             Measured drag coefficient column.
         cl_col : str
             Measured lift coefficient column.
         k_col : str
-            Induced-drag factor column (from fit_cd_polar).
+            Induced-drag factor column (from :meth:`fit_cd_polar`).
         output_col : str
-            Destination column name for e_wb.
+            Destination column name for ε_wb.
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            self.df with output_col added.
+            ``self.df`` with *output_col* added.
         """
         return self._compute_wake_blockage_e_common(
             cd0_col=cd0_col, cd_col=cd_col, cl_col=cl_col, k_col=k_col,
@@ -2152,16 +2151,20 @@ class PropOffData(BaseCorrector):
     ) -> pd.DataFrame:
         """
         Apply the combined solid + wake blockage correction to the prop-off
-        dataset. Slipstream blockage is not applicable and is excluded.
+        dataset.
 
-        Delegates to BaseCorrector._apply_combined_blockage_from_e_columns.
+        Delegates to
+        :meth:`BaseCorrector._apply_combined_blockage_from_e_columns`.
+        Slipstream blockage (ε_ss) is not applicable for prop-off data and is
+        therefore excluded.
 
-        Formulae
-        --------
-            e_total = e_sb + e_wb
+        Correction formulae:
 
-            V_corr = V / (1 + e_total)
-            C_corr = C / (1 + e_total)^2
+        .. math::
+            V_{corr} = \\frac{V}{1 + \\varepsilon_{sb} + \\varepsilon_{wb}}
+
+        .. math::
+            C_{corr} = \\frac{C}{(1 + \\varepsilon_{sb} + \\varepsilon_{wb})^{2}}
 
         Parameters
         ----------
@@ -2170,9 +2173,9 @@ class PropOffData(BaseCorrector):
         apply_ewb : bool
             Include wake-blockage correction.
         esb_col : str
-            Column name for e_sb.
+            Column name for ε_sb.
         ewb_col : str
-            Column name for e_wb.
+            Column name for ε_wb.
         velocity_cols : sequence of str
             Velocity columns to correct.
         coefficient_cols : sequence of str
@@ -2180,14 +2183,14 @@ class PropOffData(BaseCorrector):
         suffix : str
             Suffix appended to all output column names.
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            self.df with corrected columns and e_total_blockage added.
+            ``self.df`` with corrected columns and ``e_total_blockage`` added.
         """
         return self._apply_combined_blockage_from_e_columns(
             apply_esb=apply_esb, apply_ewb=apply_ewb, apply_ess=False,
@@ -2210,23 +2213,25 @@ class PropOnData(BaseCorrector):
     In addition to the wall corrections applied to the prop-off configuration,
     this class handles:
 
-    - BEM-based thrust separation from the measured body-frame axial force
-      (compute_thrust_separation_BEM).
-    - Slipstream blockage factor computation
-      (compute_slipstream_blockage_e).
-    - Attachment of prop-off drag-polar fit parameters to prop-on rows
-      (attach_fits), needed for the wake-blockage computation.
-    - Model-off tare correction (apply_modeloff_correction).
+    * BEM-based thrust separation from the measured body-frame axial force
+      (:meth:`compute_thrust_separation_BEM`).
+    * Slipstream blockage factor computation
+      (:meth:`compute_slipstream_blockage_e`).
+    * Attachment of prop-off drag-polar fit parameters to the prop-on rows
+      (:meth:`attach_fits`), needed for the wake-blockage computation.
+    * Model-off tare correction (:meth:`apply_modeloff_correction`).
 
     Parameters
     ----------
     df : pd.DataFrame
         Raw measurement dataframe.
     clip_negative_cdsep : bool
-        Clip CDsep to zero when computing wake blockage (default True).
+        Clip *C_{D_{sep}}* to zero when computing wake blockage (default
+        ``True``).
     velocity_tolerance : float
         Maximum allowable velocity difference [m/s] when matching prop-off
-        fit entries to prop-on conditions in attach_fits (default 1.0 m/s).
+        fit entries to prop-on conditions in :meth:`attach_fits`
+        (default 1.0 m/s).
     save_dir : str or Path, optional
         Output directory for CSV exports.
     """
@@ -2258,42 +2263,36 @@ class PropOnData(BaseCorrector):
         """
         Apply the streamline-curvature correction to the prop-on dataset.
 
-        Delegates to BaseCorrector._apply_streamline_curvature_common.
-        The default input lift column is 'CL_aero_BEM_blockage_corr'
-        (aerodynamic lift after BEM thrust separation and blockage
-        correction) rather than the raw 'CL_blockage_corr' used for
+        Delegates to :meth:`BaseCorrector._apply_streamline_curvature_common`.
+        The default input lift column is ``"CL_aero_BEM_blockage_corr"``
+        (the aerodynamic lift after BEM thrust separation and blockage
+        correction) rather than the raw ``"CL_blockage_corr"`` used for
         prop-off data.
-
-        Formulae (summary)
-        ------------------
-            delta_alpha_sc = tau2 * delta * (S/C) * CL_w        [rad]
-            AoA_sc         = AoA + delta_alpha_sc_deg
-            delta_CL_sc    = -delta_alpha_sc_deg * (dCL/dalpha)_tailoff
-            delta_CM_sc    = -0.25 * delta_CL_sc
 
         Parameters
         ----------
         tailoff : TailOffData
-            Reference tail-off dataset with grid_df and cl_a_df populated.
+            Reference tail-off dataset with ``grid_df`` and ``cl_a_df``
+            populated.
         tau : float, optional
-            Streamline-curvature parameter tau2. Defaults to TAU2_WING.
+            Streamline-curvature parameter τ₂.  Defaults to :attr:`TAU2_WING`.
         delta : float, optional
-            Solid-angle factor delta. Defaults to DELTA_WING.
+            Solid-angle factor δ.  Defaults to :attr:`DELTA_WING`.
         geom_factor : float, optional
-            Geometric blockage ratio S/C. Defaults to GEOM_FACTOR.
+            Geometric blockage ratio S/C.  Defaults to :attr:`GEOM_FACTOR`.
         cl_source_col : str
             Input lift-coefficient column.
         cm_source_col : str
             Input pitching-moment column.
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            Updated self.df.
+            Updated ``self.df``.
         """
         tau         = tau         if tau         is not None else self.TAU2_WING
         delta       = delta       if delta       is not None else self.DELTA_WING
@@ -2318,35 +2317,30 @@ class PropOnData(BaseCorrector):
         """
         Apply the downwash correction to the prop-on dataset.
 
-        Delegates to BaseCorrector._apply_downwash_correction_common.
-
-        Formulae (summary)
-        ------------------
-            delta_alpha_dw = delta * (S/C) * CL_w * 57.3        [deg]
-            AoA_dw         = AoA + delta_alpha_dw
-            delta_CD_dw    = delta * (S/C) * CL_w^2
+        Delegates to :meth:`BaseCorrector._apply_downwash_correction_common`.
 
         Parameters
         ----------
         tailoff : TailOffData
-            Reference tail-off dataset with grid_df populated.
+            Reference tail-off dataset with ``grid_df`` populated.
         delta : float, optional
-            Solid-angle factor delta. Defaults to DELTA_WING.
+            Solid-angle factor δ.  Defaults to :attr:`DELTA_WING`.
         geom_factor : float, optional
-            Geometric blockage ratio S/C. Defaults to GEOM_FACTOR.
+            Geometric blockage ratio S/C.  Defaults to :attr:`GEOM_FACTOR`.
         aoa_source_col : str, optional
-            AoA input column. Defaults to 'AoA_streamline_curvature_corr'.
+            AoA input column.  Defaults to
+            ``"AoA_streamline_curvature_corr"``.
         cd_source_col : str
             Drag-coefficient input column.
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            Updated self.df.
+            Updated ``self.df``.
         """
         delta       = delta       if delta       is not None else self.DELTA_WING
         geom_factor = geom_factor if geom_factor is not None else self.GEOM_FACTOR
@@ -2373,42 +2367,37 @@ class PropOnData(BaseCorrector):
         """
         Apply the tail-plane interference correction to the prop-on dataset.
 
-        Delegates to BaseCorrector._apply_tail_correction_common.
-
-        Formulae (summary)
-        ------------------
-            delta_alpha_tail = delta_t * (S/C) * CL_w * tau2_lt  [rad]
-            delta_CMpitch    = (dCm/dalpha) * delta_alpha_tail
-            CMpitch_corr     = CMpitch - delta_CMpitch
+        Delegates to :meth:`BaseCorrector._apply_tail_correction_common`.
 
         Parameters
         ----------
         tailoff : TailOffData
-            Reference tail-off dataset with grid_df populated.
+            Reference tail-off dataset with ``grid_df`` populated.
         delta : float, optional
-            Tail solid-angle factor delta_t. Defaults to DELTA_TAIL.
+            Tail solid-angle factor δ_t.  Defaults to :attr:`DELTA_TAIL`.
         geom_factor : float, optional
-            Geometric blockage ratio S/C. Defaults to GEOM_FACTOR.
+            Geometric blockage ratio S/C.  Defaults to :attr:`GEOM_FACTOR`.
         tau2_lt : float, optional
-            Tail streamline-curvature parameter tau2. Defaults to TAU2_TAIL.
+            Tail streamline-curvature parameter τ₂.  Defaults to
+            :attr:`TAU2_TAIL`.
         dcmpitch_dalpha : float, optional
-            Tail pitching-moment slope dCm/dalpha. Defaults to
-            DCMPITCH_DALPHA = -0.15676 rad^-1.
-        dcmpitch_dalpha_unit : str, 'per_rad' or 'per_deg'
-            Unit of dcmpitch_dalpha.
+            Tail pitching-moment slope ∂Cm/∂α.  Defaults to
+            :attr:`DCMPITCH_DALPHA`.
+        dcmpitch_dalpha_unit : {"per_rad", "per_deg"}
+            Unit of *dcmpitch_dalpha*.
         aoa_source_col : str, optional
             AoA input column.
         cmpitch_source_col : str
             Pitching-moment input column.
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            Updated self.df.
+            Updated ``self.df``.
         """
         delta           = delta           if delta           is not None else self.DELTA_TAIL
         geom_factor     = geom_factor     if geom_factor     is not None else self.GEOM_FACTOR
@@ -2437,50 +2426,51 @@ class PropOnData(BaseCorrector):
         fit_value_cols: Tuple[str, str] = ("CD0_fit", "k_fit"),
     ) -> pd.DataFrame:
         """
-        Attach prop-off drag-polar fit values (CD0, k) to each row of the
+        Attach prop-off drag-polar fit values (C_D0, *k*) to each row of the
         prop-on dataframe.
 
         Because the prop-on runs may not sweep the full AoA range needed to
         fit a drag polar independently, the fit coefficients from the matching
-        prop-off condition are used instead. Matching is performed on
-        (AoS_round, dE, dR) with closest-velocity selection, within the
-        tolerance set by self.velocity_tolerance.
+        prop-off condition are used instead.  Matching is performed on
+        ``(AoS_round, dE, dR)`` with closest-velocity selection within the
+        tolerance :attr:`velocity_tolerance`.
 
         Fallback order
         --------------
-        For each prop-on row, the following match strategies are attempted
-        in order and the first successful match is used:
+        For each prop-on row, the following match strategies are attempted in
+        order, and the first successful match is used:
 
-            1. exact AoS, exact dR
-            2. exact AoS, flipped dR   (sign reversal)
-            3. exact AoS, dR = 0
-            4. flipped AoS, exact dR
-            5. flipped AoS, flipped dR
-            6. flipped AoS, dR = 0
+        1. exact AoS, exact dR
+        2. exact AoS, flipped dR  (sign reversal)
+        3. exact AoS, dR = 0
+        4. flipped AoS, exact dR
+        5. flipped AoS, flipped dR
+        6. flipped AoS, dR = 0
 
-        Diagnostic columns added to self.df:
+        Diagnostic columns added to ``self.df``:
 
-            - matched_fit_velocity      velocity of the matched fit entry
-            - velocity_match_error      |V_data - V_fit|
-            - fit_found                 boolean success flag
-            - fit_match_type            label of the match strategy used
-            - matched_fit_AoS           AoS of the matched fit entry
-            - matched_fit_dR            dR of the matched fit entry
-            - matched_fit_source_row    index of matched row in fit_df
+        * ``matched_fit_velocity``   – velocity of the matched fit entry
+        * ``velocity_match_error``   – |V_data − V_fit|
+        * ``fit_found``              – boolean success flag
+        * ``fit_match_type``         – label describing the match strategy used
+        * ``matched_fit_AoS``        – AoS of the matched fit entry
+        * ``matched_fit_dR``         – dR of the matched fit entry
+        * ``matched_fit_source_row`` – index of the matched row in fit_df
 
         Parameters
         ----------
         input_fit_df : pd.DataFrame, optional
-            Prop-off fit-summary table (output of PropOffData.fit_cd_polar).
-            If None, uses self.fit_df or loads from fit_csv.
+            Prop-off fit-summary table (output of
+            :meth:`PropOffData.fit_cd_polar`).  If ``None``, uses
+            ``self.fit_df`` or loads from *fit_csv*.
         fit_csv : str or Path, optional
             Path to a CSV file containing the fit summary table.
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
         vel_col_data : str
-            Velocity column in self.df for matching.
+            Velocity column in ``self.df`` for matching.
         vel_col_fit : str
             Velocity column in the fit table for matching.
         aos_col : str
@@ -2495,7 +2485,7 @@ class PropOnData(BaseCorrector):
         Returns
         -------
         pd.DataFrame
-            self.df with fit_value_cols and diagnostic columns added.
+            ``self.df`` with *fit_value_cols* and diagnostic columns added.
 
         Raises
         ------
@@ -2610,53 +2600,56 @@ class PropOnData(BaseCorrector):
         filename: Optional[str] = None,
     ) -> pd.DataFrame:
         """
-        Compute the slipstream-blockage factor e_ss for powered conditions.
+        Compute the slipstream-blockage factor ε_ss for powered conditions.
 
         The propeller slipstream accelerates the flow behind the disc,
-        reducing the effective freestream cross-section available to the
-        rest of the model.
+        effectively reducing the freestream cross-section available to the
+        rest of the model.  The blockage factor is derived from the thrust
+        loading coefficient *T_c** (Tc_star_BEM).
 
         Formula
         -------
-            e_ss = -(Tc_star / (2 * sqrt(1 + 2*Tc_star))) * (S_prop / C)
+        .. math::
+            \\varepsilon_{ss} = -\\frac{T_c^{*}}{2\\sqrt{1 + 2\\,T_c^{*}}}
+            \\cdot \\frac{S_{prop}}{C}
 
-        where:
-            Tc_star  = thrust loading coefficient T/(q * S_prop)
-            S_prop   = single propeller disc area  [m^2]
-            C        = tunnel cross-sectional area [m^2]
+        where *S_prop* is the single propeller disc area and *C* is the
+        tunnel cross-sectional area (:attr:`TUNNEL_AREA`).
 
-        Note: e_ss is negative by construction. The slipstream increases
-        the effective dynamic pressure, so it reduces the blockage
-        correction relative to the solid and wake terms.
+        Note
+        ----
+        ε_ss is negative by construction (the slipstream increases the
+        effective dynamic pressure, thus *reducing* the blockage
+        correction relative to solid/wake blockage).
 
         Parameters
         ----------
         tc_col : str
-            Column name of the thrust loading coefficient Tc_star_BEM.
+            Column name of the thrust loading coefficient T_c*.
         D_prop : float, optional
-            Propeller diameter [m]. Defaults to PROP_DIAMETER.
+            Propeller diameter [m].  Defaults to :attr:`PROP_DIAMETER`.
         S_prop : float, optional
-            Single propeller disc area [m^2]. Computed from D_prop if
-            not supplied.
+            Single propeller disc area [m²].  Computed from *D_prop* if not
+            supplied.
         tunnel_area : float, optional
-            Tunnel cross-sectional area [m^2]. Defaults to TUNNEL_AREA.
+            Tunnel cross-sectional area [m²].  Defaults to
+            :attr:`TUNNEL_AREA`.
         output_col : str
-            Destination column name for e_ss.
+            Destination column name for ε_ss.
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            self.df with output_col added.
+            ``self.df`` with *output_col* added.
 
         Raises
         ------
         ValueError
-            If any row has (1 + 2*Tc_star) < 0, making the formula
-            undefined (square root of a negative number).
+            If any row has ``(1 + 2 T_c*) < 0``, making the formula undefined.
         """
         df = self.df.copy()
 
@@ -2690,35 +2683,32 @@ class PropOnData(BaseCorrector):
         output_col: str = "esb",
     ) -> pd.DataFrame:
         """
-        Compute and store the solid-blockage factor e_sb for the prop-on
+        Compute and store the solid-blockage factor ε_sb for the prop-on
         configuration.
 
-        Delegates to BaseCorrector._compute_solid_blockage_e_common using
-        E_SOLID_BLOCKAGE = 0.007229438.
-
-        Formula (constant mode):
-
-            e_sb = 0.007229438   (same for all rows)
+        Delegates to
+        :meth:`BaseCorrector._compute_solid_blockage_e_common` using
+        :attr:`E_SOLID_BLOCKAGE` = 0.007229438.
 
         Parameters
         ----------
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
         use_constant_e : bool
-            Use the class constant (default True).
+            Use the class constant (default ``True``).
         use_e_column : bool
-            Use a per-row value from e_column instead.
+            Use a per-row value from *e_column*.
         e_column : str
-            Source column when use_e_column is True.
+            Source column when *use_e_column* is ``True``.
         output_col : str
-            Destination column name for e_sb.
+            Destination column name for ε_sb.
 
         Returns
         -------
         pd.DataFrame
-            self.df with output_col added.
+            ``self.df`` with *output_col* added.
         """
         return self._compute_solid_blockage_e_common(
             use_constant_e=use_constant_e, use_e_column=use_e_column,
@@ -2738,18 +2728,13 @@ class PropOnData(BaseCorrector):
         filename: Optional[str] = None,
     ) -> pd.DataFrame:
         """
-        Compute and store the wake-blockage factor e_wb for the prop-on
+        Compute and store the wake-blockage factor ε_wb for the prop-on
         configuration.
 
-        Delegates to BaseCorrector._compute_wake_blockage_e_common.
+        Delegates to
+        :meth:`BaseCorrector._compute_wake_blockage_e_common`.
         The drag-polar fit values are typically attached first via
-        attach_fits.
-
-        Formulae
-        --------
-            CDi    = k * CL^2
-            CDsep  = CD - CD0 - CDi          (clipped to >= 0)
-            e_wb   = (S/(4*C))*CD0 + (5*S/(4*C))*CDsep
+        :meth:`attach_fits`.
 
         Parameters
         ----------
@@ -2762,16 +2747,16 @@ class PropOnData(BaseCorrector):
         k_col : str
             Induced-drag factor column.
         output_col : str
-            Destination column name for e_wb.
+            Destination column name for ε_wb.
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            self.df with output_col added.
+            ``self.df`` with *output_col* added.
         """
         return self._compute_wake_blockage_e_common(
             cd0_col=cd0_col, cd_col=cd_col, cl_col=cl_col, k_col=k_col,
@@ -2796,21 +2781,26 @@ class PropOnData(BaseCorrector):
         filename: Optional[str] = None,
     ) -> pd.DataFrame:
         """
-        Apply the combined solid + wake + slipstream blockage correction
-        to the prop-on dataset.
+        Apply the combined solid + wake + slipstream blockage correction to
+        the prop-on dataset.
 
-        Delegates to BaseCorrector._apply_combined_blockage_from_e_columns.
+        Delegates to
+        :meth:`BaseCorrector._apply_combined_blockage_from_e_columns`.
 
-        Formulae
-        --------
-            e_total = e_sb + e_wb + e_ss
+        The total blockage factor includes the slipstream term:
 
-            V_corr  = V / (1 + e_total)
-            C_corr  = C / (1 + e_total)^2
+        .. math::
+            \\varepsilon_{total} = \\varepsilon_{sb} + \\varepsilon_{wb}
+            + \\varepsilon_{ss}
 
-        Special case for thrust coefficient (avoids circular correction):
+        Velocity and coefficient corrections:
 
-            CFt_corr = CFt / (1 + e_sb + e_wb)^2
+        .. math::
+            V_{corr} = \\frac{V}{1 + \\varepsilon_{total}}, \\qquad
+            C_{corr} = \\frac{C}{(1 + \\varepsilon_{total})^{2}}
+
+        The thrust coefficient ``CFt_thrust_BEM`` receives only solid + wake
+        blockage (never slipstream) to avoid circular correction.
 
         Parameters
         ----------
@@ -2819,30 +2809,30 @@ class PropOnData(BaseCorrector):
         apply_ewb : bool
             Include wake-blockage correction.
         apply_ess : bool
-            Include slipstream-blockage correction (default True).
+            Include slipstream-blockage correction (default ``True``).
         esb_col : str
-            Column name for e_sb.
+            Column name for ε_sb.
         ewb_col : str
-            Column name for e_wb.
+            Column name for ε_wb.
         ess_col : str
-            Column name for e_ss.
+            Column name for ε_ss.
         velocity_cols : sequence of str
             Velocity columns to correct.
         coefficient_cols : sequence of str
             Aerodynamic coefficient columns to correct.
         cft_thrust_col : str
-            Thrust force coefficient column (receives solid + wake only).
+            Thrust force coefficient column receiving solid + wake only.
         suffix : str
             Suffix appended to all output column names.
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            self.df with corrected columns and e_total_blockage added.
+            ``self.df`` with corrected columns and ``e_total_blockage`` added.
         """
         return self._apply_combined_blockage_from_e_columns(
             apply_esb=apply_esb, apply_ewb=apply_ewb, apply_ess=apply_ess,
@@ -2864,30 +2854,31 @@ class PropOnData(BaseCorrector):
         """
         Apply the model-off tare correction to the current prop-on dataframe.
 
-        Delegates to ModelOffCorrector.apply. The correction subtracts the
-        support-structure aerodynamic tare from each measured coefficient,
-        matched by (AoA_round, AoS_round):
+        Delegates to :meth:`ModelOffCorrector.apply`.  The correction
+        subtracts the support-structure aerodynamic tare from each measured
+        coefficient, matched by ``(AoA_round, AoS_round)``:
 
-            C_corrected = C_measured - C_tare
+        .. math::
+            C_{\\text{corrected}} = C_{\\text{measured}} - C_{\\text{tare}}
 
         Parameters
         ----------
         modeloff_corrector : ModelOffCorrector
             Pre-configured model-off corrector instance.
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
         source_columns : dict[str, str], optional
             Mapping from canonical coefficient names to actual column names
-            in self.df.
+            in ``self.df``.
         cmpitch25c_column : str, optional
-            Column name of the pitching moment at 25% chord.
+            Column name of the pitching moment at the 25 % chord.
 
         Returns
         -------
         pd.DataFrame
-            Updated self.df.
+            Updated ``self.df``.
         """
         self.df = modeloff_corrector.apply(
             df=self.df, save_csv=False, filename=None,
@@ -2910,22 +2901,23 @@ class TailOffData(BaseCorrector):
 
     The tail-off dataset serves a dual role:
 
-    1. Self-correction: applies a solid-blockage correction to the tail-off
-       coefficients (no wake or slipstream blockage is applied).
+    1. **Self-correction**: applies a solid-blockage correction to the
+       tail-off coefficients (no wake or slipstream blockage).
+    2. **Reference for other datasets**: :class:`PropOffData` and
+       :class:`PropOnData` look up *CLw_tailoff* (the tail-off wing lift
+       coefficient at matching conditions) from ``self.grid_df`` to drive
+       the streamline-curvature, downwash, and tail corrections.
 
-    2. Reference for other datasets: PropOffData and PropOnData look up
-       CLw_tailoff (the tail-off wing lift coefficient at matching
-       conditions) from self.grid_df to drive the streamline-curvature,
-       downwash, and tail corrections.
-
-    Recommended usage order:
-        1. apply_solid_blockage()
-        2. build_alpha_slice_grid_by_velocity()
-        3. compute_cl_alpha_slope_by_case()    (needed for streamline curvature)
+    After calling :meth:`apply_solid_blockage`, call
+    :meth:`build_alpha_slice_grid_by_velocity` to construct the reference
+    grid ``self.grid_df``, then optionally
+    :meth:`compute_cl_alpha_slope_by_case` to populate ``self.cl_a_df``
+    for the streamline-curvature correction.
 
     Class-level override
     --------------------
-    E_SOLID_BLOCKAGE is overridden to E_SOLID_BLOCKAGE_TAILOFF = 0.006406642,
+    ``E_SOLID_BLOCKAGE`` is overridden to
+    :attr:`BaseCorrector.E_SOLID_BLOCKAGE_TAILOFF` = 0.006406642,
     reflecting the smaller model volume with the tail removed.
 
     Parameters
@@ -2933,7 +2925,7 @@ class TailOffData(BaseCorrector):
     df : pd.DataFrame
         Raw tail-off measurement dataframe.
     clip_negative_cdsep : bool
-        Retained for API consistency (unused in tail-off pipeline).
+        (Unused in tail-off pipeline; retained for API consistency.)
     save_dir : str or Path, optional
         Output directory for CSV exports.
     """
@@ -2961,36 +2953,36 @@ class TailOffData(BaseCorrector):
         """
         Apply the solid-blockage correction to the tail-off dataset.
 
-        Uses the tail-off solid-blockage constant:
+        Uses the tail-off solid-blockage constant
+        ε_sb = :attr:`E_SOLID_BLOCKAGE` = 0.006406642, which is smaller than
+        the full-configuration value because the horizontal tail is absent.
 
-            e_sb = E_SOLID_BLOCKAGE_TAILOFF = 0.006406642
+        The correction is applied with the suffix ``"solid_blockage_corr"``
+        (rather than the generic ``"blockage_corr"``) so that downstream code
+        can unambiguously identify the corrected tail-off lift column
+        ``CL_solid_blockage_corr`` during the CLw lookup.
 
-        This is smaller than the full-configuration value (0.007229438)
-        because the horizontal tail is absent, reducing the model volume.
+        Correction formulae (solid blockage only):
 
-        The correction uses the suffix 'solid_blockage_corr' (rather than
-        the generic 'blockage_corr') so that downstream code can
-        unambiguously identify the corrected lift column
-        'CL_solid_blockage_corr' during the CLw lookup.
+        .. math::
+            V_{corr} = \\frac{V}{1 + \\varepsilon_{sb}}
 
-        Formulae
-        --------
-            V_corr = V / (1 + e_sb)
-            C_corr = C / (1 + e_sb)^2
+        .. math::
+            C_{corr} = \\frac{C}{(1 + \\varepsilon_{sb})^{2}}
 
         Parameters
         ----------
         save_csv : bool
-            Write output CSV if True.
+            Write output CSV if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            self.df with V_solid_blockage_corr, CL_solid_blockage_corr,
-            CD_solid_blockage_corr, and other *_solid_blockage_corr
-            columns added.
+            ``self.df`` with ``V_solid_blockage_corr``,
+            ``CL_solid_blockage_corr``, ``CD_solid_blockage_corr``,
+            and other ``*_solid_blockage_corr`` columns added.
         """
         # Step 1: store e as "esb" column using E_SOLID_BLOCKAGE
         # (overridden above to E_SOLID_BLOCKAGE_TAILOFF for this class)
@@ -3021,60 +3013,61 @@ class TailOffData(BaseCorrector):
         filename: Optional[str] = None,
     ) -> pd.DataFrame:
         """
-        Build a complete (AoA_round, AoS_round) grid of tail-off coefficients
-        for each V_round.
+        Build a complete ``(AoA_round, AoS_round)`` grid of tail-off
+        coefficients for each ``V_round``.
 
         The tail-off test matrix typically sweeps AoS at a few fixed AoA
-        anchor values. This method constructs a dense grid over all
-        combinations of AoA and AoS using the following priority:
+        anchor values.  This method constructs a dense grid over all
+        combinations of AoA and AoS by:
 
-            1. Measured: use the value directly where available.
-            2. Interpolation in AoA: linearly interpolate between anchor
-               slices when the target AoA lies within the measured range
-               at that AoS.
-            3. Extrapolation in AoA: linearly extrapolate beyond the range
-               using the two nearest anchor points when the target AoA is
-               outside the measured range.
-            4. Unresolved: leave as NaN if fewer than two anchor slices
-               are available at the requested AoS.
+        1. **Measured**: use the value directly where available.
+        2. **Interpolation in AoA**: linearly interpolate between anchor
+           slices when the target AoA lies within the measured range at that
+           AoS.
+        3. **Extrapolation in AoA**: linearly extrapolate beyond the range
+           (using the two nearest anchor points) when the target AoA is
+           outside the measured range.
+        4. **Unresolved**: leave as NaN if fewer than two anchor slices are
+           available at the requested AoS.
 
         The source type of each grid cell is recorded in the column
-        'source_type' with values:
-            'measured', 'interp_alpha', 'extrap_alpha', 'unresolved'
+        ``source_type`` with values ``"measured"``, ``"interp_alpha"``,
+        ``"extrap_alpha"``, or ``"unresolved"``.
 
-        The resulting grid_df is stored in self.grid_df and used as the
-        CLw lookup table by PropOffData and PropOnData correction methods.
+        The resulting ``grid_df`` is stored in ``self.grid_df`` and is used
+        as the CLw lookup table by the blockage, streamline-curvature,
+        downwash, and tail correction methods of
+        :class:`PropOffData` and :class:`PropOnData`.
 
         Parameters
         ----------
         coeff_cols : list of str, optional
-            Coefficient columns to include in the grid. Defaults to
-            CL_solid_blockage_corr, CD_solid_blockage_corr, and their
-            raw equivalents if present in self.df.
+            Coefficient columns to include in the grid.  Defaults to
+            ``CL_solid_blockage_corr``, ``CD_solid_blockage_corr``, and
+            their raw equivalents if present.
         anchor_aoa_vals : tuple of float
-            AoA values [degrees] at which AoS sweeps are available.
-            Used as interpolation anchors.
+            AoA values (degrees) at which AoS sweeps are available.  Used as
+            interpolation anchors.
         extra_aoa_vals : iterable of float, optional
-            Additional AoA values to force into the grid even if not
-            measured.
+            Additional AoA values to include in the grid even if not measured.
         extra_aos_vals : iterable of float, optional
-            Additional AoS values to force into the grid even if not
-            measured.
+            Additional AoS values to include in the grid even if not measured.
         save_csv : bool
-            Write self.grid_df to disk if True.
+            Write ``self.grid_df`` to disk if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            self.grid_df with columns: V_round, AoA_round, AoS_round,
-            case_available, source_type, and all coeff_cols.
+            The grid stored in ``self.grid_df``, with columns:
+            ``V_round``, ``AoA_round``, ``AoS_round``,
+            ``case_available``, ``source_type``, and all *coeff_cols*.
 
         Raises
         ------
         ValueError
-            If none of the anchor_aoa_vals are present at a given velocity,
+            If none of the *anchor_aoa_vals* are present at a given velocity,
             or if no coefficient columns are found.
         """
         df = self.df.copy()
@@ -3106,16 +3099,10 @@ class TailOffData(BaseCorrector):
 
         def interp_or_extrap_alpha(x_target, x_known, y_known):
             """
-            Interpolate or extrapolate y at x_target given paired arrays
-            (x_known, y_known). Returns (value, source_label) where
-            source_label is one of 'interp_alpha', 'extrap_alpha', or
-            'unresolved'. Returns (nan, 'unresolved') if fewer than two
-            valid points exist.
-
-            Extrapolation uses the two nearest known points (linear):
-
-                slope = (y1 - y0) / (x1 - x0)
-                y_extrap = y0 + slope * (x_target - x0)
+            Interpolate or extrapolate *y* at *x_target* given paired arrays
+            (*x_known*, *y_known*).  Returns the interpolated/extrapolated value
+            and a source label ``"interp_alpha"`` or ``"extrap_alpha"``.
+            Returns ``(nan, "unresolved")`` if fewer than two valid points exist.
             """
             valid = ~(np.isnan(x_known) | np.isnan(y_known))
             x, y  = x_known[valid], y_known[valid]
@@ -3242,25 +3229,20 @@ class TailOffData(BaseCorrector):
         filename: Optional[str] = None,
     ) -> pd.DataFrame:
         """
-        Compute the CL-alpha slope for each (V_round, AoS_round) case
-        using a linear regression over a specified AoA range.
+        Compute the CL-alpha slope for each ``(V_round, AoS_round)`` case
+        using a linear regression over the specified AoA range.
 
-        For each test condition, fits the linear model:
+        For each test condition, fits:
 
-            CL = CL0 + (dCL/dalpha) * alpha
+        .. math::
+            C_L = C_{L_0} + \\left(\\frac{\\partial C_L}{\\partial \\alpha}
+            \\right) \\alpha
 
-        using ordinary least squares, where the slope is in units of
-        per degree. The AoA range used for the fit is [aoa_min, aoa_max].
+        where the slope is in units of per degree.
 
-        The result is stored in self.cl_a_df and is subsequently used by
-        the streamline-curvature correction to scale the AoA and CL
+        The result is stored in ``self.cl_a_df`` and is subsequently used by
+        the streamline-curvature correction method to scale the AoA and CL
         corrections.
-
-        Goodness of fit:
-
-            SS_res = sum( (CL - CL_predicted)^2 )
-            SS_tot = sum( (CL - mean(CL))^2 )
-            R^2    = 1 - SS_res / SS_tot
 
         Parameters
         ----------
@@ -3269,7 +3251,7 @@ class TailOffData(BaseCorrector):
         aoa_max : float
             Maximum AoA [degrees] to include in the linear fit.
         cl_col : str
-            Lift-coefficient column in self.grid_df.
+            Lift-coefficient column in ``self.grid_df``.
         aoa_col : str
             AoA column name.
         aos_col : str
@@ -3277,32 +3259,32 @@ class TailOffData(BaseCorrector):
         v_col : str
             Velocity column name.
         min_points : int
-            Minimum number of distinct AoA points required to attempt a
-            fit. Cases with fewer points receive NaN and fit_success=False.
+            Minimum number of distinct AoA points required to attempt a fit.
+            Cases with fewer points receive ``NaN`` and ``fit_success=False``.
         save_csv : bool
-            Write self.cl_a_df to disk if True.
+            Write ``self.cl_a_df`` to disk if ``True``.
         filename : str, optional
             Override output file name.
 
         Returns
         -------
         pd.DataFrame
-            self.cl_a_df with one row per (V_round, AoS_round) case,
-            containing:
+            ``self.cl_a_df`` with one row per ``(V_round, AoS_round)``
+            case, containing:
 
-            - cl_alpha_slope_per_deg    dCL/dalpha [deg^-1]
-            - cl_at_aoa0               intercept CL0
-            - r2                        coefficient of determination R^2
-            - n_points                  number of data points used
-            - n_unique_aoa              number of unique AoA values
-            - aoa_min_fit               the aoa_min argument
-            - aoa_max_fit               the aoa_max argument
-            - fit_success               boolean flag
+            * ``cl_alpha_slope_per_deg`` – ∂CL/∂α [deg⁻¹]
+            * ``cl_at_aoa0``            – intercept C_L0
+            * ``r2``                    – coefficient of determination R²
+            * ``n_points``              – number of data points used
+            * ``n_unique_aoa``          – number of unique AoA values
+            * ``aoa_min_fit``           – the *aoa_min* argument
+            * ``aoa_max_fit``           – the *aoa_max* argument
+            * ``fit_success``           – boolean flag
 
         Raises
         ------
         ValueError
-            If self.grid_df has not been built yet.
+            If ``self.grid_df`` has not been built yet.
         """
         if self.grid_df is None:
             raise ValueError("grid_df is not available. Run build_alpha_slice_grid_by_velocity() first.")

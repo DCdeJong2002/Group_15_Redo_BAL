@@ -721,230 +721,223 @@ class BaseCorrector:
 
         return self.df
 
-    def compute_ct_from_propon_propoff(
+
+    def compute_ct_thrust_from_bem(
         self,
-        propoff_df,
-        cd_col_off: str = "CD",
-        cl_col_off: str = "CL",
-        cyaw_col_off: str = "CYaw",
-        aoa_col_off: str = "AoA",
-        aos_col_off: str = "AoS",
-        ct_col_on: str = "CT",
-        cd_col_on: str = "CD",
-        aoa_col_on: str = "AoA",
-        aos_col_on: str = "AoS",
-        dR_col: str = "dR",
-        dE_col: str = "dE",
-        V_col_off: str = "V",
-        aoa_round_col: str = "AoA_round",
-        aos_round_col: str = "AoS_round",
-        V_round_col: str = "V_round",
-        ct_off_col: str = "CT_off",
-        cd_off_col: str = "CD_off",
-        CT_prop_col: str = "CT_prop",
-        Tc_star_col: str = "Tc_star",
-        dCD_net_col: str = "dCD_net_pre_corr",
-        dCD_from_dCT_col: str = "dCD_from_dCT_pre_corr",
+        df: pd.DataFrame,
+        j_col: str = "J",
+        v_col: str = "V",
+        rho_col: str = "rho",
+        q_col: str = "q",
+        D: float = 0.2032,
         S_wing: float = 0.2172,
         S_prop: float = np.pi * 0.25 * (0.2032 ** 2),
+        n_props: int = 2,
+        output_cft_col: str = "CFt_thrust_BEM",
+        output_tcstar_col: str = "Tc_star_BEM",
+    ) -> pd.DataFrame:
+        """
+        Compute the propeller thrust force coefficient from the BEM polynomial
+        (Appendix B, Lab Manual AE4115) and non-dimensionalise it using the
+        same convention as the balance data (q * S_wing).
+ 
+        BEM polynomial (per propeller):
+            CT_bem(J) = T / (rho * n^2 * D^4)
+                      = -0.0051*J^4 + 0.0959*J^3 - 0.5888*J^2 + 1.0065*J - 0.1353
+ 
+        Steps
+        -----
+        1. Evaluate CT_bem per row from J.
+        2. Back-calculate n [rps] from V and J:  n = V / (J * D)
+        3. Convert to dimensional thrust per prop: T = CT_bem * rho * n^2 * D^4
+        4. Total thrust for both props:           T_total = n_props * T
+        5. Non-dimensionalise with balance convention:
+               CFt_thrust = T_total / (q * S_wing)
+        6. Compute Tc_star_BEM = T_total / (q * S_prop)
+ 
+        Parameters
+        ----------
+        df           : input dataframe (not modified in place; updated copy returned)
+        j_col        : column with advance ratio
+        v_col        : column with freestream velocity [m/s]
+        rho_col      : column with air density [kg/m^3]
+        q_col        : column with dynamic pressure [Pa]
+        D            : propeller diameter [m]
+        S_wing       : wing reference area [m^2]
+        S_prop       : propeller disk area [m^2] (one prop)
+        n_props      : number of propellers (default 2)
+        output_cft_col   : name for the CFt_thrust output column
+        output_tcstar_col: name for the Tc_star_BEM output column
+ 
+        Returns
+        -------
+        df : dataframe with new columns added
+        """
+        df = df.copy()
+ 
+        self.require_columns(
+            df,
+            [j_col, v_col, rho_col, q_col],
+            context="compute_ct_thrust_from_bem",
+        )
+ 
+        J     = pd.to_numeric(df[j_col],   errors="coerce")
+        V     = pd.to_numeric(df[v_col],   errors="coerce")
+        rho   = pd.to_numeric(df[rho_col], errors="coerce")
+        q     = pd.to_numeric(df[q_col],   errors="coerce")
+ 
+        # BEM polynomial: CT_bem = T / (rho * n^2 * D^4)  [per propeller]
+        CT_bem = (
+            -0.0051 * J**4
+            + 0.0959 * J**3
+            - 0.5888 * J**2
+            + 1.0065 * J
+            - 0.1353
+        )
+ 
+        # Back-calculate n [rps] from J = V / (n * D)
+        # Guard against J=0 or NaN to avoid division by zero
+        n_rps = V / (J.replace(0, np.nan) * D)
+ 
+        # Dimensional thrust per propeller [N]
+        T_one = CT_bem * rho * n_rps**2 * D**4
+ 
+        # Total thrust [N] for all propellers
+        T_total = n_props * T_one
+ 
+        # Non-dimensionalise using balance convention: F / (q * S_wing)
+        df[output_cft_col] = T_total / (q * S_wing)
+ 
+        # Tc_star using BEM thrust: T_total / (q * S_prop)
+        df[output_tcstar_col] = T_total / (q * S_prop)
+ 
+        return df
+ 
+    def compute_thrust_separation_BEM(
+        self,
+        ct_col_on: str = "CT",
+        aoa_col_on: str = "AoA",
+        aos_col_on: str = "AoS",
+        S_wing: float = 0.2172,
+        S_prop: float = np.pi * 0.25 * (0.2032 ** 2),
+        recompute_cd: bool = True,
+        recompute_cl: bool = True,
+        recompute_cyaw: bool = False,
     ):
         """
-        Compute thrust-related prop-on minus prop-off quantities by matching prop-on
-        and prop-off operating conditions.
-
+        Separate propeller thrust from the measured axial body-frame force
+        coefficient (CT) using the BEM polynomial from Appendix B of the
+        AE4115 lab manual, and optionally recompute wind-axis coefficients
+        with thrust removed.
+ 
         Workflow
         --------
-        1. Copy the prop-on dataframe from self.df and the prop-off dataframe from
-        propoff_df.
-        2. In the prop-off dataframe create rounded matching columns:
-        - V_round   : rounded to nearest integer
-        - AoA_round : rounded to nearest 0.5 deg
-        - AoS_round : rounded to nearest integer
-        3. Compute CT_off from prop-off CD, CL, CYaw, AoA, and AoS using the inverse
-        of the code's force transformation:
-
-            CT = (CD*cos(beta) - CYaw*sin(beta))*cos(alpha) - CL*sin(alpha)
-
-        where alpha = AoA [rad] and beta = AoS [rad].
-
-        4. Build two prop-off lookup tables:
-        - a full table that matches on AoS_round, AoA_round, dR, dE, V_round
-        - a fallback table that ignores dR and averages over dR
-
-        5. Match prop-on and prop-off as follows:
-        - if dR == 0, require a full match including dR
-        - if dR != 0, ignore dR during matching
-
-        6. Compute:
-        - CT_prop      = CT_off - CT_on
-        - Tc_star      = CT_prop * (S_wing / S_prop)
-        - dCD_net      = CD_off - CD_on
-        - dCD_from_dCT = CT_prop * cos(AoA) * cos(AoS)
-
-        Notes
-        -----
-        - CT_prop is defined here so that a positive value corresponds to a positive
-        thrust-like contribution for the sign convention where CT_off is more
-        positive than CT_on.
-        - dCD_net is the direct net drag-axis difference between matched prop-off and
-        prop-on cases.
-        - dCD_from_dCT is the drag-axis difference implied by deltaCT only, assuming
-        the force change acts only through the axial coefficient.
-        - This preserves your currently implemented Tc_star definition. If you want
-        the Barlow/Pope definition exactly, it is usually:
-
-            Tc_star = 0.5 * CT_prop * (S_wing / S_prop)
-
-        because CT is based on qS and q = 0.5 * rho * V^2.
+        1. Evaluate the BEM polynomial CT_bem(J) per row to get the isolated
+           propeller thrust coefficient (per propeller, T/(rho*n^2*D^4)).
+        2. Convert to a body-frame force coefficient using the balance
+           non-dimensionalisation (q * S_wing), summed over both propellers:
+               CFt_thrust_BEM = T_total / (q * S_wing)
+        3. Compute Tc_star_BEM = T_total / (q * S_prop).
+        4. Subtract BEM thrust from the measured CT to isolate the aerodynamic
+           axial force (airframe drag + interference drag, no thrust):
+               CFt_aero_BEM = CT_measured - CFt_thrust_BEM
+        5. Reproject CFt_aero_BEM to wind axes (BAL_forces formulae) for any
+           coefficient whose recompute flag is True:
+               CL_aero_BEM   = CFn*cos(alpha) - CFt_aero*sin(alpha)
+               CD_aero_BEM   = (CFn*sin(alpha) + CFt_aero*cos(alpha))*cos(beta)
+                               + CFs*sin(beta)
+               CYaw_aero_BEM = -(CFn*sin(alpha) + CFt_aero*cos(alpha))*sin(beta)
+                               + CFs*cos(beta)
+           CFn (CN) and CFs (CY) are unchanged by propeller thrust in all cases.
+ 
+        Always-added columns
+        --------------------
+        CFt_thrust_BEM  : BEM propeller thrust as body-frame force coefficient
+        Tc_star_BEM     : thrust loading coefficient  T_total / (q * S_prop)
+        CFt_aero_BEM    : body-frame axial aero force with thrust removed
+ 
+        Conditionally-added columns (controlled by flags)
+        --------------------------------------------------
+        CD_aero_BEM   : wind-axis drag with thrust removed   (recompute_cd=True)
+        CL_aero_BEM   : wind-axis lift with thrust removed   (recompute_cl=True)
+        CYaw_aero_BEM : wind-axis yaw force with thrust removed (recompute_cyaw=True)
+ 
+        Parameters
+        ----------
+        ct_col_on      : column name for measured axial body-frame force coefficient
+        aoa_col_on     : column name for angle of attack [deg]
+        aos_col_on     : column name for angle of sideslip [deg]
+        S_wing         : wing reference area [m^2]
+        S_prop         : propeller disk area for one propeller [m^2]
+        recompute_cd   : if True, compute CD_aero_BEM  (default True)
+        recompute_cl   : if True, compute CL_aero_BEM  (default True)
+        recompute_cyaw : if True, compute CYaw_aero_BEM (default False)
         """
-
-        df_on = self.df.copy()
-        df_off = propoff_df.copy()
-
-        # -----------------------------
-        # Required columns
-        # -----------------------------
+ 
+        df = self.df.copy()
+ 
         self.require_columns(
-            df_on,
-            [
-                ct_col_on,
-                cd_col_on,
-                aoa_col_on,
-                aos_col_on,
-                aoa_round_col,
-                aos_round_col,
-                dR_col,
-                dE_col,
-                V_round_col,
-            ],
-            context="prop-on CT calculation",
+            df,
+            [ct_col_on, aoa_col_on, aos_col_on, "J", "V", "rho", "q", "CN", "CY", "CT"],
+            context="compute_thrust_separation_BEM",
         )
-
-        self.require_columns(
-            df_off,
-            [
-                cd_col_off,
-                cl_col_off,
-                cyaw_col_off,
-                aoa_col_off,
-                aos_col_off,
-                dR_col,
-                dE_col,
-                V_col_off,
-            ],
-            context="prop-off CT calculation",
+ 
+        # -------------------------------------------------------------
+        # Step 1–3: BEM thrust coefficient and Tc_star
+        # -------------------------------------------------------------
+        df = self.compute_ct_thrust_from_bem(
+            df=df,
+            j_col="J",
+            v_col="V",
+            rho_col="rho",
+            q_col="q",
+            D=0.2032,
+            S_wing=S_wing,
+            S_prop=S_prop,
+            n_props=2,
+            output_cft_col="CFt_thrust_BEM",
+            output_tcstar_col="Tc_star_BEM",
         )
+ 
+        alpha = np.deg2rad(pd.to_numeric(df[aoa_col_on], errors="coerce"))
+        beta  = np.deg2rad(pd.to_numeric(df[aos_col_on], errors="coerce"))
+ 
+        # Step 4: Add BEM thrust back to recover aerodynamic-only axial force.
+        #   CT_measured = aero_drag - thrust   (thrust acts forward, drag acts aft)
+        #   CFt_aero    = CT_measured + thrust = aero drag with thrust removed
+        #   Expected: positive (drag-like) once thrust is stripped out
 
-        # -----------------------------
-        # Build rounded matching columns in prop-off
-        # -----------------------------
-        df_off[V_round_col] = np.round(df_off[V_col_off]).astype("Int64")
-        df_off[aoa_round_col] = np.round(df_off[aoa_col_off] * 2.0) / 2.0
-        df_off[aos_round_col] = np.round(df_off[aos_col_off]).astype("Int64")
+        ct_on   = pd.to_numeric(df[ct_col_on],        errors="coerce")
+        cft_bem = pd.to_numeric(df["CFt_thrust_BEM"], errors="coerce")
 
-        # -----------------------------
-        # Compute CT_off from CD, CL, CYaw, AoA, AoS
-        # CT = (CD*cos(beta) - CYaw*sin(beta))*cos(alpha) - CL*sin(alpha)
-        # Also keep CD_off for later merge
-        # -----------------------------
-        alpha_off = np.deg2rad(pd.to_numeric(df_off[aoa_col_off], errors="coerce"))
-        beta_off = np.deg2rad(pd.to_numeric(df_off[aos_col_off], errors="coerce"))
-
-        cd_off_numeric = pd.to_numeric(df_off[cd_col_off], errors="coerce")
-        cl_off_numeric = pd.to_numeric(df_off[cl_col_off], errors="coerce")
-        cyaw_off_numeric = pd.to_numeric(df_off[cyaw_col_off], errors="coerce")
-
-        df_off[ct_off_col] = (
-            (cd_off_numeric * np.cos(beta_off) - cyaw_off_numeric * np.sin(beta_off)) * np.cos(alpha_off)
-            - cl_off_numeric * np.sin(alpha_off)
-        )
-        df_off[cd_off_col] = cd_off_numeric
-
-        # -----------------------------
-        # Build reduced prop-off tables
-        # - full match table includes dR
-        # - fallback table ignores dR and averages over dR
-        # -----------------------------
-        match_cols_full = [aos_round_col, aoa_round_col, dR_col, dE_col, V_round_col]
-        match_cols_no_dR = [aos_round_col, aoa_round_col, dE_col, V_round_col]
-
-        df_off_small_full = (
-            df_off[match_cols_full + [ct_off_col, cd_off_col]]
-            .groupby(match_cols_full, as_index=False, dropna=False)[[ct_off_col, cd_off_col]]
-            .mean()
-        )
-
-        df_off_small_no_dR = (
-            df_off[match_cols_no_dR + [ct_off_col, cd_off_col]]
-            .groupby(match_cols_no_dR, as_index=False, dropna=False)[[ct_off_col, cd_off_col]]
-            .mean()
-        )
-
-        # -----------------------------
-        # Split prop-on data
-        # - if dR == 0: match including dR
-        # - if dR != 0: ignore dR in matching
-        # -----------------------------
-        df_on_dR0 = df_on[df_on[dR_col] == 0].copy()
-        df_on_dRneq0 = df_on[df_on[dR_col] != 0].copy()
-
-        # preserve original order
-        df_on_dR0["_orig_order"] = df_on_dR0.index
-        df_on_dRneq0["_orig_order"] = df_on_dRneq0.index
-
-        # -----------------------------
-        # Merge cases where dR = 0
-        # -----------------------------
-        df_match_dR0 = df_on_dR0.merge(
-            df_off_small_full,
-            on=match_cols_full,
-            how="left",
-        )
-
-        # -----------------------------
-        # Merge cases where dR != 0
-        # -----------------------------
-        df_match_dRneq0 = df_on_dRneq0.merge(
-            df_off_small_no_dR,
-            on=match_cols_no_dR,
-            how="left",
-        )
-
-        # -----------------------------
-        # Combine back and restore order
-        # -----------------------------
-        df = pd.concat([df_match_dR0, df_match_dRneq0], ignore_index=True)
-        df = df.sort_values("_orig_order").drop(columns="_orig_order").reset_index(drop=True)
-
-        # -----------------------------
-        # Compute CT_prop and Tc_star
-        # -----------------------------
-        df[CT_prop_col] = (
-            pd.to_numeric(df[ct_off_col], errors="coerce")
-            - pd.to_numeric(df[ct_col_on], errors="coerce")
-        )
-
-        df[Tc_star_col] = df[CT_prop_col] * (S_wing / S_prop)
-
-        # -----------------------------
-        # Compute drag-difference diagnostics
-        # dCD_net       = direct drag-axis difference
-        # dCD_from_dCT  = drag-axis difference implied by deltaCT only
-        # -----------------------------
-        alpha_on = np.deg2rad(pd.to_numeric(df[aoa_col_on], errors="coerce"))
-        beta_on = np.deg2rad(pd.to_numeric(df[aos_col_on], errors="coerce"))
-
-        df[dCD_net_col] = (
-            pd.to_numeric(df[cd_off_col], errors="coerce")
-            - pd.to_numeric(df[cd_col_on], errors="coerce")
-        )
-
-        df[dCD_from_dCT_col] = (
-            pd.to_numeric(df[CT_prop_col], errors="coerce")
-            * np.cos(alpha_on)
-            * np.cos(beta_on)
-        )
-
+        #df["CFt_aero_BEM"] = ct_on - cft_bem
+        df["CFt_aero_BEM"] = ct_on + cft_bem
+ 
+        # -------------------------------------------------------------
+        # Step 5: Reproject to wind axes using BAL_forces formulae.
+        # CFn (CN) and CFs (CY) are unchanged by propeller thrust.
+        # -------------------------------------------------------------
+        CFn      = pd.to_numeric(df["CN"], errors="coerce")
+        CFs      = pd.to_numeric(df["CY"], errors="coerce")
+        CFt_aero = df["CFt_aero_BEM"]
+ 
+        if recompute_cd:
+            df["CD_aero_BEM"] = (
+                (CFn * np.sin(alpha) + CFt_aero * np.cos(alpha)) * np.cos(beta)
+                + CFs * np.sin(beta)
+            )
+ 
+        if recompute_cl:
+            df["CL_aero_BEM"] = (
+                CFn * np.cos(alpha) - CFt_aero * np.sin(alpha)
+            )
+ 
+        if recompute_cyaw:
+            df["CYaw_aero_BEM"] = (
+                -(CFn * np.sin(alpha) + CFt_aero * np.cos(alpha)) * np.sin(beta)
+                + CFs * np.cos(beta)
+            )
+ 
         self.df = df
         return self.df
     
@@ -1060,6 +1053,7 @@ class BaseCorrector:
         velocity_cols: Sequence[str] = ("V",),
         coefficient_cols: Sequence[str] = ("CL", "CD", "CYaw", "CMroll", "CMpitch", "CMyaw"),
         suffix: str = "blockage_corr",
+        cft_thrust_col: str = "CFt_thrust_BEM",
         save_csv: bool = False,
         filename: Optional[str] = None,
         default_filename: str = "combined_blockage_corrected.csv",
@@ -1076,6 +1070,10 @@ class BaseCorrector:
         where:
             e_total = e_sb + e_wb + e_ss
         depending on the requested flags.
+
+        CFt_thrust_BEM receives solid + wake blockage only (never slipstream),
+        because it is the thrust coefficient that *causes* slipstream blockage
+        rather than a measurement contaminated by it.
         """
         df = self.df.copy()
 
@@ -1095,7 +1093,7 @@ class BaseCorrector:
 
         df["e_total_blockage"] = e_total
 
-        velocity_factor = 1.0 / (1.0 + df["e_total_blockage"])
+        velocity_factor    = 1.0 / (1.0 + df["e_total_blockage"])
         coefficient_factor = 1.0 / (1.0 + df["e_total_blockage"]) ** 2
 
         for col in velocity_cols:
@@ -1105,6 +1103,20 @@ class BaseCorrector:
         for col in coefficient_cols:
             if col in df.columns:
                 df[f"{col}_{suffix}"] = df[col] * coefficient_factor
+
+        # ----------------------------------------------------------------
+        # CFt_thrust_BEM: apply solid + wake blockage only, never slipstream.
+        # e_esb_ewb is recomputed from just those two components so that
+        # this correction is independent of the apply_ess flag.
+        # ----------------------------------------------------------------
+        if cft_thrust_col in df.columns:
+            e_esb_ewb = pd.Series(0.0, index=df.index, dtype=float)
+            if apply_esb:
+                e_esb_ewb = e_esb_ewb + df[esb_col].fillna(0.0)
+            if apply_ewb:
+                e_esb_ewb = e_esb_ewb + df[ewb_col].fillna(0.0)
+            cft_factor = 1.0 / (1.0 + e_esb_ewb) ** 2
+            df[f"{cft_thrust_col}_{suffix}"] = df[cft_thrust_col] * cft_factor
 
         self.df = df
 
@@ -1236,14 +1248,14 @@ class ModelOffCorrector(BaseCorrector):
 
         required_corr_cols = [
             "AoA_round", "AoS_round",
-            "CD", "CY", "CL", "CMroll", "CMpitch", "CMyaw"
+            "CD", "CYaw", "CL", "CMroll", "CMpitch", "CMyaw"
         ]
         self.require_columns(corr_df, required_corr_cols, context="ModelOff correction grid")
 
         corr_df = corr_df[required_corr_cols].copy()
         corr_df = corr_df.rename(columns={
             "CD": "CD_modeloff",
-            "CY": "CY_modeloff",
+            "CYaw": "CYaw_modeloff",
             "CL": "CL_modeloff",
             "CMroll": "CMroll_modeloff",
             "CMpitch": "CMpitch_modeloff",
@@ -1258,6 +1270,8 @@ class ModelOffCorrector(BaseCorrector):
         df: pd.DataFrame,
         save_csv: bool = False,
         filename: Optional[str] = None,
+        source_columns: Optional[dict[str, str]] = None,
+        cmpitch25c_column: Optional[str] = None,
     ) -> pd.DataFrame:
         """
         Apply model-off correction to the provided dataframe.
@@ -1265,15 +1279,71 @@ class ModelOffCorrector(BaseCorrector):
         Uses AoA_round / AoS_round if present.
         Otherwise uses AoA / AoS rounded internally to nearest 0.5.
         Temporary merge columns are not kept in the returned dataframe.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input dataframe to correct.
+        save_csv : bool, optional
+            If True, save the corrected dataframe.
+        filename : str, optional
+            Output filename if save_csv=True.
+        source_columns : dict[str, str], optional
+            Mapping from canonical coefficient names to the actual dataframe
+            columns that should be corrected.
+
+            Canonical names allowed:
+                "CD", "CYaw", "CL", "CMroll", "CMpitch", "CMyaw"
+
+            Example
+            -------
+            source_columns = {
+                "CD": "CD_SC",
+                "CL": "CL_SC",
+                "CMpitch": "CMpitch_SC"
+            }
+
+            Then the correction becomes:
+                CD_SC      = CD_SC      - CD_modeloff
+                CL_SC      = CL_SC      - CL_modeloff
+                CMpitch_SC = CMpitch_SC - CMpitch_modeloff
+
+            If None, the default behaviour is used:
+                CD      = CD      - CD_modeloff
+                CYaw    = CYaw    - CYaw_modeloff
+                CL      = CL      - CL_modeloff
+                CMroll  = CMroll  - CMroll_modeloff
+                CMpitch = CMpitch - CMpitch_modeloff
+                CMyaw   = CMyaw   - CMyaw_modeloff
+
+        cmpitch25c_column : str, optional
+            Column name to use for the 25%-chord pitching moment correction.
+            If None, defaults to "CMpitch25c" when present.
         """
         correction_map = {
             "CD": "CD_modeloff",
-            "CY": "CY_modeloff",
+            "CYaw": "CYaw_modeloff",
             "CL": "CL_modeloff",
             "CMroll": "CMroll_modeloff",
             "CMpitch": "CMpitch_modeloff",
             "CMyaw": "CMyaw_modeloff",
         }
+
+        # Default: correct the standard columns themselves
+        default_source_columns = {
+            "CD": "CD",
+            "CYaw": "CYaw",
+            "CL": "CL",
+            "CMroll": "CMroll",
+            "CMpitch": "CMpitch",
+            "CMyaw": "CMyaw",
+        }
+
+        if source_columns is None:
+            source_columns = default_source_columns.copy()
+        else:
+            # Start from defaults and overwrite only what the user specified
+            source_columns = {**default_source_columns, **source_columns}
 
         df_work = df.copy()
 
@@ -1310,14 +1380,24 @@ class ModelOffCorrector(BaseCorrector):
         # --------------------------------------------------------
         # Apply corrections
         # --------------------------------------------------------
-        for data_col, corr_col in correction_map.items():
+        for canonical_name, corr_col in correction_map.items():
+            data_col = source_columns.get(canonical_name)
+
             if data_col in merged.columns:
                 merged[f"{data_col}_uncorrected"] = merged[data_col]
                 merged[data_col] = merged[data_col] - merged[corr_col]
 
-        if self.apply_cmpitch_to_25c and "CMpitch25c" in merged.columns and "CMpitch_modeloff" in merged.columns:
-            merged["CMpitch25c_uncorrected"] = merged["CMpitch25c"]
-            merged["CMpitch25c"] = merged["CMpitch25c"] - merged["CMpitch_modeloff"]
+        # --------------------------------------------------------
+        # Optional CMpitch25c correction
+        # --------------------------------------------------------
+        if self.apply_cmpitch_to_25c and "CMpitch_modeloff" in merged.columns:
+            target_cmpitch25c_col = cmpitch25c_column or "CMpitch25c"
+
+            if target_cmpitch25c_col in merged.columns:
+                merged[f"{target_cmpitch25c_col}_uncorrected"] = merged[target_cmpitch25c_col]
+                merged[target_cmpitch25c_col] = (
+                    merged[target_cmpitch25c_col] - merged["CMpitch_modeloff"]
+                )
 
         # --------------------------------------------------------
         # Remove temporary merge keys
@@ -1637,8 +1717,8 @@ class PropOnData(BaseCorrector):
         tau: float,
         delta: float,
         geom_factor: float = 0.2172 / 2.07,
-        cl_source_col: str = "CL_solid_blockage_corr",
-        cm_source_col: str = "CMpitch_solid_blockage_corr",
+        cl_source_col: str = "CL_blockage_corr",
+        cm_source_col: str = "CMpitch_blockage_corr",
         save_csv: bool = False,
         filename: Optional[str] = None,
     ) -> pd.DataFrame:
@@ -1687,7 +1767,7 @@ class PropOnData(BaseCorrector):
         dcmpitch_dalpha: float = -0.15676,
         dcmpitch_dalpha_unit: str = "per_rad",
         aoa_source_col: Optional[str] = None,
-        cmpitch_source_col: str = "CMpitch_solid_blockage_corr",
+        cmpitch_source_col: str = "CMpitch_blockage_corr",
         save_csv: bool = False,
         filename: Optional[str] = None,
     ) -> pd.DataFrame:
@@ -1840,7 +1920,7 @@ class PropOnData(BaseCorrector):
 
     def compute_slipstream_blockage_e(
         self,
-        tc_col: str = "Tc_star",
+        tc_col: str = "Tc_star_BEM",
         dp_value: Optional[float] = 0.2032,
         sp_value: Optional[float] = None,
         tunnel_area: Optional[float] = None,
@@ -1930,6 +2010,7 @@ class PropOnData(BaseCorrector):
         coefficient_cols: Sequence[str] = (
             "CL", "CD", "CYaw", "CMroll", "CMpitch", "CMyaw"
         ),
+        cft_thrust_col: str = "CFt_thrust_BEM",
         suffix: str = "blockage_corr",
         save_csv: bool = False,
         filename: Optional[str] = None,
@@ -1943,12 +2024,76 @@ class PropOnData(BaseCorrector):
             ess_col=ess_col,
             velocity_cols=velocity_cols,
             coefficient_cols=coefficient_cols,
+            cft_thrust_col=cft_thrust_col,
             suffix=suffix,
             save_csv=save_csv,
             filename=filename,
             default_filename="propOn_blockage_corrected.csv",
         )
     
+    def apply_modeloff_correction(
+        self,
+        modeloff_corrector,
+        save_csv: bool = False,
+        filename: Optional[str] = None,
+        source_columns: Optional[dict[str, str]] = None,
+        cmpitch25c_column: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Apply model-off correction to the current prop-on dataframe.
+
+        Parameters
+        ----------
+        modeloff_corrector : ModelOffCorrector
+            An initialized ModelOffCorrector instance containing the correction grid.
+        save_csv : bool, optional
+            If True, save the corrected dataframe.
+        filename : str, optional
+            Output filename if save_csv=True.
+        source_columns : dict[str, str], optional
+            Mapping from canonical coefficient names to the actual dataframe
+            columns that should be corrected.
+
+            Allowed canonical keys:
+                "CD", "CYaw", "CL", "CMroll", "CMpitch", "CMyaw"
+
+            Example
+            -------
+            source_columns = {
+                "CD": "CD_SC",
+                "CL": "CL_SC",
+                "CMpitch": "CMpitch_SC",
+            }
+
+            Then:
+                CD_SC      = CD_SC      - CD_modeloff
+                CL_SC      = CL_SC      - CL_modeloff
+                CMpitch_SC = CMpitch_SC - CMpitch_modeloff
+
+            If None, the default columns are corrected:
+                CD, CYaw, CL, CMroll, CMpitch, CMyaw
+        cmpitch25c_column : str, optional
+            Column name to use for the 25%-chord pitching moment correction.
+            If None, defaults to "CMpitch25c" when present.
+
+        Returns
+        -------
+        pd.DataFrame
+            The corrected dataframe, also stored in self.df.
+        """
+        self.df = modeloff_corrector.apply(
+            df=self.df,
+            save_csv=False,
+            filename=None,
+            source_columns=source_columns,
+            cmpitch25c_column=cmpitch25c_column,
+        )
+
+        if save_csv:
+            save_name = filename or "propOn_modeloff_corrected.csv"
+            self.save_df(self.df, save_name)
+
+        return self.df
     
 #=============================================================================================
 #Tail-off data

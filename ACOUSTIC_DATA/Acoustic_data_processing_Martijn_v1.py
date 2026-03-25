@@ -3,160 +3,148 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from nptdms import TdmsFile
-from scipy.signal import find_peaks
-from scipy.interpolate import interp1d
-from scipy.fft import fft, fftfreq
 
 # ============================================================
-# 1. CORE PROCESSING FUNCTIONS
+# 1. SCIENTIFIC PROCESSING (FOURIER SERIES METHOD WITH AVERAGING)
 # ============================================================
 
-def phase_avg_data(y, one_p, fs, rps, ph_intp, d_ph=0):
-    """Segment data by rotation triggers and ensemble average."""
-    n_s = len(one_p)
-    t = np.linspace(0, n_s/fs, n_s, endpoint=False)
-    peaks, _ = find_peaks(one_p, height=-0.0001)
-
-    if len(peaks) < 2:
-        return np.zeros(len(ph_intp)), np.array([])
-
-    d_idx = int(round((d_ph / 360.0) * (1.0 / rps) * fs))
-    peaks = peaks - d_idx
-    peaks = peaks[peaks >= 0]
+def calculate_clean_fourier_spsl(p_mic, fs, segment_size=4096):
+    """
+    Calculates a clean SPSL [dB/Hz] line using averaged Fourier Series.
+    Averaging segments reduces variance to prevent a 'wide noise area'.
+    Equations followed:
+    1. detrend(p) ensures a0/2 term is zero.
+    2. df = fs / segment_size
+    3. phi_segment = (an^2 + bn^2) / (2 * df)
+    """
+    p_ref = 20e-6
+    num_segments = len(p_mic) // segment_size
+    phi_accum = np.zeros(segment_size // 2 + 1)
+    df = fs / segment_size
     
-    rev_interpolated = []
-    for j in range(len(peaks) - 1):
-        y_rev = y[peaks[j]:peaks[j+1]+1]
-        ph_rev = np.linspace(0, 2 * np.pi, len(y_rev))
-        f_interp = interp1d(ph_rev, y_rev, kind='linear', fill_value="extrapolate")
-        rev_interpolated.append(f_interp(ph_intp))
+    for i in range(num_segments):
+        # Extract segment and detrend (a0/2 = 0 per lecture slides)
+        segment = p_mic[i*segment_size : (i+1)*segment_size]
+        segment = segment - np.mean(segment)
+        
+        # Fourier Transform to get real an and imaginary bn coefficients
+        X = np.fft.rfft(segment)
+        an = (2.0 / segment_size) * np.real(X)
+        bn = -(2.0 / segment_size) * np.imag(X)
+        
+        # Calculate Spectral Density phi(f) [Pa^2/Hz] for this segment
+        phi_segment = (an**2 + bn**2) / (2.0 * df)
+        phi_accum += phi_segment
+        
+    # Ensemble average segments to create the 'single line'
+    phi_avg = phi_accum / num_segments
+    
+    # Convert Spectral Density to SPSL [dB/Hz]
+    # Small constant added to avoid log10(0)
+    spsl = 10 * np.log10(phi_avg / (p_ref**2) + 1e-12)
+    freqs = np.fft.rfftfreq(segment_size, 1/fs)
+    
+    return freqs, spsl
 
-    y_avg = np.mean(np.array(rev_interpolated), axis=0)
-    return y_avg, np.array(rev_interpolated)
+def load_mic_data(folder_path, target_files, fs, D=0.2032):
+    """Processes folder, calculates J, and applies Fourier analysis to each run."""
+    results = []
+    if not os.path.exists(folder_path): return pd.DataFrame()
 
-def calculate_spl_spectrum(p_mic, fs):
-    """FFT analysis for Sound Pressure Level in dB."""
-    n = len(p_mic)
-    p_fft = fft(p_mic)
-    freqs = fftfreq(n, 1/fs)
-    pos_mask = freqs > 0
-    freqs = freqs[pos_mask]
-    psd = (np.abs(p_fft[pos_mask])**2) / (n * fs)
-    p_ref = 20e-6 
-    spl = 10 * np.log10(psd / (p_ref**2))
-    return freqs, spl
+    for meta_fn in target_files:
+        meta_path = os.path.join(folder_path, meta_fn)
+        if not os.path.exists(meta_path): continue
+        
+        df_meta = pd.read_csv(meta_path, sep=',', header=None)
+        for _, row in df_meta.iterrows():
+            # Extract metadata: Col 0=DPN, Col 6=V_inf, Col 12=AoA, Col 14=RPS
+            dpn, v_inf, aoa, rps = int(float(row[0])), float(row[6]), round(float(row[12]), 1), float(row[14])
+            
+            # Calculate non-dimensional Advance Ratio J (critical for propeller loading)
+            j_adv = round(v_inf / (rps * D), 2) if rps > 0 else 0
+            
+            tdms_fn = f"{meta_fn[:-4]}_run{dpn}_001.tdms"
+            tdms_path = os.path.join(folder_path, tdms_fn)
+            
+            if os.path.exists(tdms_path):
+                # Read TDMS binary acoustic data
+                tdms_file = TdmsFile.read(tdms_path)
+                p_mic = tdms_file.groups()[0].channels()[0].data
+                
+                # Perform the full Fourier transformation chain
+                freqs, spsl = calculate_clean_fourier_spsl(p_mic, fs)
+                results.append({
+                    'config': meta_fn, 'aoa': aoa, 'j_adv': j_adv, 
+                    'rps': rps, 'freqs': freqs, 'spsl': spsl, 'dpn': dpn
+                })
+    return pd.DataFrame(results)
 
 # ============================================================
-# 2. MAIN EXECUTION
+# 2. MAIN EXECUTION & SWEEP ANALYSIS
 # ============================================================
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    fn_folder = os.path.join(script_dir, 'Mic')
+    mic_folder = os.path.join(script_dir, 'Mic')
+    # Sampling frequency, diameter (from manual), and number of blades
+    fs, D, num_blades = 51200.0, 0.2032, 6
+    target_files = ['DPN18.txt', 'DPN19.txt', 'DPN26.txt', 'DPN27.txt']
     
-    fn_list = [f for f in os.listdir(fn_folder) if f.startswith('DPN') and f.endswith('.txt') and '_' not in f]
-    fn_list.sort() 
+    print("Executing Fourier Series analysis and J/AoA sweeps...")
+    df = load_mic_data(mic_folder, target_files, fs, D)
+    if df.empty: return
 
-    fs = 51200.0
-    ph_intp = np.linspace(0, 2 * np.pi, 361)[:-1] 
-    d_ph = 0
+    # Define the custom bright color cycle requested by the user
+    color_cycle = ['b', 'r', 'g'] # Bright Blue, Bright Red, Bright Green
 
-    all_config_results = {}
-
-    for fn in fn_list:
-        avg_path = os.path.join(fn_folder, fn)
-        print(f"\n--- Processing Configuration: {fn} ---")
+    # --- PLOT 1: J Sweep - ABSOLUTE FREQUENCY (Constant AoA = 2.5°) ---
+    # This plot visualizes how the noise severity changes as the propeller loading (J) varies.
+    plt.figure(figsize=(10, 5))
+    j_data = df[df['aoa'] == 2.5].sort_values('j_adv')
+    
+    for i, (_, row) in enumerate(j_data.iterrows()):
+        # Select the color from the cycle (blue, red, green)
+        color = color_cycle[i % 3]
         
-        try:
-            avg_data = pd.read_csv(avg_path, sep=',', header=None).values
-        except Exception as e:
-            print(f" [!] Error reading {fn}: {e}")
-            continue
-
-        dpn_list = avg_data[:, 0].astype(int)
-        aoa_list = avg_data[:, 12]
-        rps_list = avg_data[:, 14]
-
-        config_data = {'aoa': [], 'rps': [], 'p_rms': [], 'y_avg_samples': [], 'spectra': []}
-
-        for j, dpn in enumerate(dpn_list):
-            tdms_filename = f"{fn[:-4]}_run{dpn}_001.tdms"
-            tdms_path = os.path.join(fn_folder, tdms_filename)
-
-            if not os.path.exists(tdms_path):
-                continue
-
-            print(f" [+] Run {dpn}: AoA = {aoa_list[j]:.1f}°, RPS = {rps_list[j]:.1f} Hz")
-            
-            tdms_file = TdmsFile.read(tdms_path)
-            group = tdms_file.groups()[0]
-            p_mic = group.channels()[0].data
-            one_p = group.channels()[1].data
-
-            # Calculations
-            y_avg, _ = phase_avg_data(p_mic, one_p, fs, rps_list[j], ph_intp, d_ph)
-            freqs, spl = calculate_spl_spectrum(p_mic, fs)
-            p_rms = np.sqrt(np.mean(y_avg**2))
-            
-            config_data['aoa'].append(aoa_list[j])
-            config_data['rps'].append(rps_list[j])
-            config_data['p_rms'].append(p_rms)
-            
-            # Save samples with RPS metadata
-            if j == 0 or j == len(dpn_list)//2:
-                config_data['y_avg_samples'].append((aoa_list[j], rps_list[j], y_avg))
-                config_data['spectra'].append((aoa_list[j], rps_list[j], freqs, spl, rps_list[j]*6))
-
-        all_config_results[fn] = config_data
-
-    # ============================================================
-    # 3. MULTI-CONFIG PLOTTING WITH RPS ANNOTATIONS
-    # ============================================================
-    if not all_config_results:
-        return
-
-    # FIGURE 1: Phase-Averaged Signal (Comparison in Radians)
-    plt.figure(figsize=(10, 8))
-    first_config = list(all_config_results.keys())[0]
-    samples = all_config_results[first_config]['y_avg_samples']
-    for i, (aoa, rps, y_val) in enumerate(samples[:2]):
-        plt.subplot(2, 1, i+1)
-        plt.plot(ph_intp, y_val, color='tab:blue')
-        plt.title(f"{first_config} | Signal at AoA = {aoa:.1f}°, RPS = {rps:.1f} Hz")
-        plt.ylabel("Pressure [Pa]")
-        plt.xlabel("Phase Angle [rad]")
-        plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-
-    # FIGURE 2: Spectral Comparison (SPL vs Frequency)
-    plt.figure(figsize=(10, 6))
-    for config_name, data in all_config_results.items():
-        if data['spectra']:
-            aoa, rps, f, s, bpf = data['spectra'][0]
-            plt.semilogx(f, s, label=f"{config_name} (AoA={aoa:.1f}°, {rps:.1f} Hz)", alpha=0.7)
-            plt.axvline(bpf, color='red', linestyle='--', alpha=0.2)
-    plt.title("Sound Pressure Level (SPL) Comparison with BPF Markers")
-    plt.xlabel("Frequency [Hz]")
-    plt.ylabel("SPL [dB/Hz]")
-    plt.legend(fontsize='small', ncol=2)
-    plt.grid(True, which="both", alpha=0.2)
-
-    # FIGURE 3: Comparative RMS Trend (Labeling points with RPS)
-    plt.figure(figsize=(10, 6))
-    for config_name, data in all_config_results.items():
-        plt.plot(data['aoa'], data['p_rms'], 'o-', label=config_name)
-        # Add RPS text annotations to individual points
-        for k in range(len(data['aoa'])):
-            plt.text(data['aoa'][k], data['p_rms'][k], f" {data['rps'][k]:.0f}Hz", 
-                     fontsize=8, verticalalignment='bottom')
-
-    plt.title("Acoustic Intensity Trend: All Experimental Configurations")
-    plt.xlabel("Angle of Attack [deg]")
-    plt.ylabel("Tonal pRMS [Pa]")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+        # Calculate BPF for labeling
+        bpf = row['rps'] * num_blades
+        
+        plt.plot(row['freqs'], row['spsl'], color=color, 
+                 label=f"J = {row['j_adv']:.2f} (BPF ≈ {bpf:.0f}Hz)")
     
+    plt.title("J-Sweep: Acoustic Severity vs. Propeller Loading (Constant AoA = 2.5°)")
+    plt.xlabel("Frequency [Hz]")
+    plt.ylabel("SPSL [dB/Hz]")
+    plt.xlim([0, 5000]) # Capture first ~5 harmonics at max RPS
+    plt.ylim([35, 85])
+    plt.legend(title="Advance Ratio", fontsize='small')
+    plt.grid(True, alpha=0.3)
+
+    # --- PLOT 2: AoA Sweep - NORMALIZED FREQUENCY (Constant J ≈ 1.6) ---
+    # This plot isolates the "Propulsion-Airframe Integration Effect" by keeping the loading (J) constant.
+    plt.figure(figsize=(10, 5))
+    # Filter for data points very close to the target J=1.6
+    aoa_data = df[abs(df['j_adv'] - 1.6) <= 0.05].sort_values('aoa')
+    
+    for i, (_, row) in enumerate(aoa_data.iterrows()):
+        # Select the color from the cycle (blue, red, green)
+        color = color_cycle[i % 3]
+        
+        # Normalize the frequency axis by the specific BPF of this run
+        bpf = row['rps'] * num_blades
+        plt.plot(row['freqs'] / bpf, row['spsl'], color=color, 
+                 label=f"AoA = {row['aoa']:.1f}°")
+    
+    plt.title("AoA Sweep: Propeller-Airframe Integration Effect (Constant J ≈ 1.6)")
+    plt.xlabel("Normalized Frequency [$f / f_b$]")
+    plt.ylabel("SPSL [dB/Hz]")
+    # Vertical reference line for the fundamental Blade Passage Frequency
+    plt.axvline(1, color='red', linestyle='--', alpha=0.5, label='BPF')
+    plt.xlim([0, 6]) # View fundamental through 6th harmonic
+    plt.ylim([35, 85])
+    plt.legend(title="Angle of Attack", fontsize='small')
+    plt.grid(True, alpha=0.3)
+
     plt.show()
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()

@@ -4,11 +4,32 @@ generate_explorer_html.py
 Reads propOn_final.csv and propOff_final.csv, merges them on the rounded
 index columns, and writes a fully self-contained interactive HTML explorer.
 
-The HTML has two pages:
+The HTML has three data pages and a Help page:
     1. PropOn vs PropOff  — comparison of FINAL coefficients and corrections,
                             coloured by J value, with prop-off as dashed reference.
     2. PropOff Explorer   — full propOff dataset, colour-by selector, polar
                             and correction metrics, actual/rounded x-axis toggle.
+    3. Stability & Control — Cnβ, Cn_dR, Cy_dR, Cr_dR derivatives fitted by
+                            linear regression, drag polar, and trim analysis.
+    4. Help               — full usage guide and metric glossary.
+
+Direct import usage
+-------------------
+    from generate_explorer_html import load_and_build, generate_html
+    from pathlib import Path
+
+    (cmp_rows, off_rows, meta, j_colors, v_colors,
+     cn_beta_on, cn_beta_off, cn_dr_on, cn_dr_off,
+     polar_on, polar_off, trim_rows, sc_meta) = load_and_build(
+        propon_path  = Path("results_propOn_FINAL/propOn_final.csv"),
+        propoff_path = Path("results_propOff_FINAL/propOff_final.csv"),
+    )
+    generate_html(
+        cmp_rows, off_rows, meta, j_colors, v_colors,
+        cn_beta_on, cn_beta_off, cn_dr_on, cn_dr_off,
+        polar_on, polar_off, trim_rows, sc_meta,
+        out_path = Path("results_propOn_FINAL/explorer.html"),
+    )
 
 Usage
 -----
@@ -267,13 +288,152 @@ def load_and_build(propon_path: Path, propoff_path: Path):
     v_colors = {str(v): V_PALETTE[i % len(V_PALETTE)]
                 for i, v in enumerate(meta["off"]["V"])}
 
-    return cmp_rows, off_rows, meta, j_colors, v_colors
+    # ----------------------------------------------------------------
+    # Stability & Control derivatives
+    # ----------------------------------------------------------------
+    def linfit(x, y):
+        """Linear fit, returns (slope, intercept, r2) or (None,None,None)."""
+        x, y = np.array(x, float), np.array(y, float)
+        mask = ~(np.isnan(x) | np.isnan(y))
+        x, y = x[mask], y[mask]
+        if len(x) < 2:
+            return None, None, None
+        b, a = np.polyfit(x, y, 1)
+        yhat  = a + b * x
+        ss_res = np.sum((y - yhat) ** 2)
+        ss_tot = np.sum((y - np.mean(y)) ** 2)
+        r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else None
+        return round(float(b), 6), round(float(a), 6), (round(r2, 4) if r2 is not None else None)
+
+    # Cn_beta (dCMyaw/dAoS) — propOn
+    cn_beta_on = []
+    for (aoa, j, v, dr), g in on_df.groupby(["AoA_round", "J_round", "V_round", "dR"]):
+        grp = g.groupby("AoS_round")[["CMyaw_FINAL", "CYaw_FINAL"]].mean().reset_index()
+        if grp["AoS_round"].nunique() < 2:
+            continue
+        slope_cn, _, r2_cn = linfit(grp["AoS_round"], grp["CMyaw_FINAL"])
+        slope_cy, _, r2_cy = linfit(grp["AoS_round"], grp["CYaw_FINAL"])
+        if slope_cn is None:
+            continue
+        cn_beta_on.append({"AoA": flt(aoa), "J": flt(j), "V": flt(v), "dR": flt(dr),
+                            "Cn_beta": slope_cn, "r2_cn": r2_cn,
+                            "Cy_beta": slope_cy, "r2_cy": r2_cy,
+                            "n_pts": int(grp["AoS_round"].nunique())})
+
+    # Cn_beta — propOff
+    cn_beta_off = []
+    for (aoa, v, dr, de), g in off_df.groupby(["AoA_round", "V_round", "dR", "dE"]):
+        grp = g.groupby("AoS_round")[["CMyaw_FINAL", "CYaw_FINAL"]].mean().reset_index()
+        if grp["AoS_round"].nunique() < 3:
+            continue
+        slope_cn, _, r2_cn = linfit(grp["AoS_round"], grp["CMyaw_FINAL"])
+        slope_cy, _, r2_cy = linfit(grp["AoS_round"], grp["CYaw_FINAL"])
+        if slope_cn is None:
+            continue
+        cn_beta_off.append({"AoA": flt(aoa), "V": flt(v), "dR": flt(dr), "dE": flt(de),
+                             "Cn_beta": slope_cn, "r2_cn": r2_cn,
+                             "Cy_beta": slope_cy, "r2_cy": r2_cy,
+                             "n_pts": int(grp["AoS_round"].nunique())})
+
+    # Cn_dR (dCMyaw/ddR) — propOn
+    cn_dr_on = []
+    for (aoa, j, v, aos), g in on_df.groupby(["AoA_round", "J_round", "V_round", "AoS_round"]):
+        grp = g.groupby("dR")[["CMyaw_FINAL", "CYaw_FINAL", "CMroll_FINAL"]].mean().reset_index()
+        if grp["dR"].nunique() < 2:
+            continue
+        slope_cn, icpt_cn, r2_cn = linfit(grp["dR"], grp["CMyaw_FINAL"])
+        slope_cy, _, _            = linfit(grp["dR"], grp["CYaw_FINAL"])
+        slope_cr, _, _            = linfit(grp["dR"], grp["CMroll_FINAL"])
+        if slope_cn is None:
+            continue
+        dr_trim = round(-icpt_cn / slope_cn, 2) if abs(slope_cn) > 1e-8 else None
+        cn_dr_on.append({"AoA": flt(aoa), "J": flt(j), "V": flt(v), "AoS": flt(aos),
+                          "Cn_dR": slope_cn, "Cy_dR": slope_cy, "Cr_dR": slope_cr,
+                          "r2_cn": r2_cn, "dR_trim": flt(dr_trim),
+                          "n_pts": int(grp["dR"].nunique())})
+
+    # Cn_dR — propOff
+    cn_dr_off = []
+    for (aoa, v, aos, de), g in off_df.groupby(["AoA_round", "V_round", "AoS_round", "dE"]):
+        grp = g.groupby("dR")[["CMyaw_FINAL", "CYaw_FINAL", "CMroll_FINAL"]].mean().reset_index()
+        if grp["dR"].nunique() < 2:
+            continue
+        slope_cn, icpt_cn, r2_cn = linfit(grp["dR"], grp["CMyaw_FINAL"])
+        slope_cy, _, _            = linfit(grp["dR"], grp["CYaw_FINAL"])
+        slope_cr, _, _            = linfit(grp["dR"], grp["CMroll_FINAL"])
+        if slope_cn is None:
+            continue
+        dr_trim = round(-icpt_cn / slope_cn, 2) if abs(slope_cn) > 1e-8 else None
+        cn_dr_off.append({"AoA": flt(aoa), "V": flt(v), "AoS": flt(aos), "dE": flt(de),
+                           "Cn_dR": slope_cn, "Cy_dR": slope_cy, "Cr_dR": slope_cr,
+                           "r2_cn": r2_cn, "dR_trim": flt(dr_trim),
+                           "n_pts": int(grp["dR"].nunique())})
+
+    # Drag polar rows
+    polar_on  = [{"CL": flt(r.CL_FINAL), "CD": flt(r.CD_FINAL),
+                  "J": flt(r.J_round), "V": flt(r.V_round),
+                  "AoA": flt(r.AoA_round), "AoS": flt(r.AoS_round), "dR": flt(r.dR)}
+                 for _, r in on_df.iterrows()]
+    polar_off = [{"CL": flt(r.CL_FINAL), "CD": flt(r.CD_FINAL),
+                  "V": flt(r.V_round), "AoA": flt(r.AoA_round),
+                  "AoS": flt(r.AoS_round), "dR": flt(r.dR), "dE": flt(r.dE)}
+                 for _, r in off_df.iterrows()]
+
+    # Trim analysis — dR where CMyaw = 0, with interpolated CL, CD, L/D
+    trim_rows = []
+    for entry in cn_dr_on:
+        dr_t = entry.get("dR_trim")
+        if dr_t is None or not (-25 <= dr_t <= 5):
+            continue
+        sub = on_df[(on_df.AoA_round == entry["AoA"]) &
+                    (on_df.J_round   == entry["J"])   &
+                    (on_df.V_round   == entry["V"])   &
+                    (on_df.AoS_round == entry["AoS"])].sort_values("dR")
+        if len(sub) < 2:
+            cl_t = cd_t = ld_t = None
+        else:
+            cl_t = float(np.interp(dr_t, sub["dR"].values, sub["CL_FINAL"].values))
+            cd_t = float(np.interp(dr_t, sub["dR"].values, sub["CD_FINAL"].values))
+            ld_t = cl_t / cd_t if cd_t and cd_t != 0 else None
+        trim_rows.append({"AoA": entry["AoA"], "J": entry["J"], "V": entry["V"],
+                           "AoS": entry["AoS"], "dR_trim": flt(dr_t),
+                           "Cn_dR": entry["Cn_dR"],
+                           "CL_trim": flt(cl_t), "CD_trim": flt(cd_t), "LD_trim": flt(ld_t)})
+
+    # SC dropdown metadata
+    sc_meta = {
+        "on": {
+            "J":   sorted(set(r["J"]   for r in cn_beta_on)),
+            "V":   sorted(set(r["V"]   for r in cn_beta_on)),
+            "AoA": sorted(set(r["AoA"] for r in cn_beta_on)),
+            "dR":  sorted(set(r["dR"]  for r in cn_beta_on)),
+            "AoS_dr": sorted(set(r["AoS"] for r in cn_dr_on)),
+        },
+        "off": {
+            "V":   sorted(set(r["V"]   for r in cn_beta_off)),
+            "AoA": sorted(set(r["AoA"] for r in cn_beta_off)),
+            "dR":  sorted(set(r["dR"]  for r in cn_beta_off)),
+            "dE":  sorted(set(r["dE"]  for r in cn_beta_off)),
+        },
+    }
+
+    print(f"  Cn_beta_on : {len(cn_beta_on)} fits")
+    print(f"  Cn_beta_off: {len(cn_beta_off)} fits")
+    print(f"  Cn_dR_on   : {len(cn_dr_on)} fits")
+    print(f"  Cn_dR_off  : {len(cn_dr_off)} fits")
+    print(f"  Trim rows  : {len(trim_rows)}")
+
+    return (cmp_rows, off_rows, meta, j_colors, v_colors,
+            cn_beta_on, cn_beta_off, cn_dr_on, cn_dr_off,
+            polar_on, polar_off, trim_rows, sc_meta)
 
 
 # ---------------------------------------------------------------------------
 # HTML generation
 # ---------------------------------------------------------------------------
-def generate_html(cmp_rows, off_rows, meta, j_colors, v_colors, out_path: Path):
+def generate_html(cmp_rows, off_rows, meta, j_colors, v_colors,
+                  cn_beta_on, cn_beta_off, cn_dr_on, cn_dr_off,
+                  polar_on, polar_off, trim_rows, sc_meta, out_path: Path):
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -358,6 +518,31 @@ select:focus{{border-color:var(--accent);}}
 .chart-box{{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 14px 10px;}}
 .chart-wrap{{position:relative;width:100%;height:360px;}}
 .chart-meta{{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:8px;text-align:right;}}
+
+/* HELP PAGE */
+.help-grid{{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:1100px;}}
+.help-card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px 22px;}}
+.help-card h2{{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.1em;
+               text-transform:uppercase;color:var(--accent);margin-bottom:14px;
+               padding-bottom:8px;border-bottom:1px solid var(--border);}}
+.help-card h3{{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.06em;
+               text-transform:uppercase;color:var(--accent2);margin:14px 0 6px;}}
+.help-card p{{font-size:12px;line-height:1.7;color:#c0c4d8;margin-bottom:8px;}}
+.help-card ul{{padding-left:16px;margin-bottom:8px;}}
+.help-card li{{font-size:12px;line-height:1.8;color:#c0c4d8;}}
+.help-tag{{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:600;
+           padding:2px 8px;border-radius:3px;margin:2px 2px 2px 0;
+           background:var(--surface2);border:1px solid var(--border);color:var(--text);}}
+.help-tag.blue{{background:#1e3a5f;border-color:#3b6cb7;color:#93c5fd;}}
+.help-tag.green{{background:#1a3d2e;border-color:#2d6a4f;color:#6ee7b7;}}
+.help-tag.muted{{color:var(--muted);}}
+.help-full{{grid-column:1/-1;}}
+.help-formula{{font-family:var(--mono);font-size:11px;background:var(--surface2);
+               border:1px solid var(--border);border-radius:4px;padding:10px 14px;
+               margin:8px 0;color:#e2e4f0;line-height:1.9;}}
+.help-intro{{font-size:13px;line-height:1.7;color:#c0c4d8;max-width:1100px;
+             margin-bottom:16px;padding:14px 18px;background:var(--surface);
+             border:1px solid var(--border);border-radius:var(--r);}}
 </style>
 </head>
 <body>
@@ -366,6 +551,8 @@ select:focus{{border-color:var(--accent);}}
   <span class="topbar-title">AE4115 &nbsp;/&nbsp; Data Explorer</span>
   <button class="nav-tab active" onclick="switchPage('cmp',this)">PropOn vs PropOff</button>
   <button class="nav-tab" onclick="switchPage('off',this)">PropOff Explorer</button>
+  <button class="nav-tab" onclick="switchPage('sc',this)">Stability &amp; Control</button>
+  <button class="nav-tab" onclick="switchPage('help',this)">Help</button>
 </div>
 
 <!-- PAGE 1 — COMPARISON -->
@@ -481,12 +668,301 @@ select:focus{{border-color:var(--accent);}}
   </div>
 </div>
 
+<!-- PAGE 3 — STABILITY & CONTROL -->
+<div class="page" id="page-sc">
+  <div class="ctrl-bar">
+    <div class="ctrl-group"><span class="ctrl-label">plot</span>
+      <select id="sc-plot">
+        <option value="cn_beta">Cn_beta vs AoA</option>
+        <option value="cy_beta">Cy_beta vs AoA</option>
+        <option value="cn_dr">Cn_dR vs AoA</option>
+        <option value="cy_dr">Cy_dR vs AoA</option>
+        <option value="cr_dr">Cr_dR vs AoA (roll coupling)</option>
+        <option value="polar">Drag polar (CL vs CD)</option>
+        <option value="trim_dr">Trim dR vs AoA</option>
+        <option value="trim_ld">L/D at trim vs AoA</option>
+        <option value="trim_cl">CL at trim vs AoA</option>
+      </select>
+    </div>
+    <div class="ctrl-group"><span class="ctrl-label">dataset</span>
+      <select id="sc-src">
+        <option value="both">both</option>
+        <option value="on">prop-on only</option>
+        <option value="off">prop-off only</option>
+      </select>
+    </div>
+    <div class="sep"></div>
+    <div class="ctrl-group"><span class="ctrl-label">V (m/s)</span>
+      <select id="sc-v"><option value="all">all</option>
+        {opts_html(sorted(set(meta['cmp']['V'] + meta['off']['V'])))}
+      </select>
+    </div>
+    <div class="ctrl-group"><span class="ctrl-label">fix dR</span>
+      <select id="sc-dr"><option value="all">all</option>
+        {opts_html(sorted(set(meta['cmp']['dR'] + meta['off']['dR'])))}
+      </select>
+    </div>
+    <div class="ctrl-group"><span class="ctrl-label">fix dE (off)</span>
+      <select id="sc-de"><option value="all">all</option>
+        {opts_html(meta['off']['dE'])}
+      </select>
+    </div>
+    <div class="ctrl-group"><span class="ctrl-label">fix AoS (dR plots)</span>
+      <select id="sc-aos"><option value="all">all</option>
+        {opts_html(sorted(set(meta['cmp']['AoS'] + meta['off']['AoS'])), "{}°")}
+      </select>
+    </div>
+    <div class="sep"></div>
+    <div class="ctrl-group">
+      <span class="ctrl-label" id="sc-r2-label">min R²</span>
+      <select id="sc-r2min">
+        <option value="0">no filter</option>
+        <option value="0.7">0.70</option>
+        <option value="0.8" selected>0.80</option>
+        <option value="0.9">0.90</option>
+        <option value="0.95">0.95</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="cards" id="sc-cards"></div>
+  <div class="chart-box">
+    <div class="legend" id="sc-legend"></div>
+    <div class="chart-wrap"><canvas id="sc-chart"></canvas></div>
+    <p class="chart-meta" id="sc-meta">Derivatives fitted by linear regression on rounded index values &nbsp;|&nbsp; Filter by min R² to exclude poor fits</p>
+  </div>
+</div>
+
+<!-- PAGE 4 — HELP -->
+<div class="page" id="page-help">
+  <p class="help-intro">
+    This tool visualises the fully corrected aerodynamic wind-tunnel data from the AE4115 lab.
+    All plotted values are <strong>_FINAL</strong> columns — the end result of the complete
+    wall-correction pipeline (model-off tare, blockage, streamline-curvature, downwash, and
+    tail-plane interference corrections). Use the tabs at the top to switch between the
+    comparison view and the propOff explorer.
+  </p>
+
+  <div class="help-grid">
+
+    <!-- COMPARISON TAB -->
+    <div class="help-card">
+      <h2>PropOn vs PropOff — Comparison</h2>
+      <p>Overlays prop-on and prop-off data on the same chart, coloured by advance ratio J.
+         The prop-off line is always shown as a dashed grey reference.</p>
+
+      <h3>Controls</h3>
+      <ul>
+        <li><strong>x-axis</strong> — choose what to sweep: AoA, AoS, or dR.</li>
+        <li><strong>J</strong> — filter to a single advance ratio, or show all J values at once.</li>
+        <li><strong>V (m/s)</strong> — filter to a single tunnel speed.</li>
+        <li><strong>fix AoA / fix AoS / fix dR</strong> — lock a dimension to a specific value.
+            When set to <span class="help-tag muted">—</span> all values are included and
+            <em>averaged together</em> at each x point.</li>
+        <li><strong>Actual x toggle</strong> — when OFF, the x-axis uses rounded grid values
+            (AoA_round etc.) used for indexing. When ON, the axis shows the actual
+            measured/corrected values (AoA, AoA_FINAL, V_FINAL). The grouping and
+            averaging always uses rounded values regardless.</li>
+      </ul>
+
+      <h3>Metric tabs</h3>
+      <p>Two groups separated by a gap:</p>
+      <ul>
+        <li><span class="help-tag blue">CL CD CMpitch CYaw CMroll CMyaw CFt</span>
+            — final aerodynamic coefficients.</li>
+        <li><span class="help-tag green">ΔCL sc ΔCD dw ΔCM sc ΔCM tail Δα dw Δα tail ε total ε wake ε slip Tc* CLw ref CD0 fit k fit R² fit</span>
+            — correction magnitudes and blockage factors.</li>
+      </ul>
+
+      <h3>Summary cards</h3>
+      <p>For coefficient metrics (group 1), cards show the mean difference
+         (prop-on minus prop-off) per J value across the currently filtered data.
+         Green = prop-on higher, red = prop-on lower. Cards are hidden for
+         correction metrics since a Δ of a correction does not have a clear sign convention.</p>
+
+      <h3>Averaging behaviour</h3>
+      <p>When a fix filter is set to <span class="help-tag muted">—</span>, all values in
+         that dimension are averaged together at each x point. For example if fix AoS = —
+         and x-axis = AoA, each chart point is the mean over all sideslip angles at that AoA.
+         This can smooth out asymmetric effects — fix AoS = 0° for the cleanest symmetric case.</p>
+      <p>PropOff data is additionally averaged over repeat runs at the same index before
+         being merged with prop-on data.</p>
+    </div>
+
+    <!-- PROPOFF EXPLORER -->
+    <div class="help-card">
+      <h2>PropOff Explorer</h2>
+      <p>Shows all individual propOff measurements (4000+ rows) without any aggregation.
+         Useful for inspecting the full AoA sweep range, drag polars, and correction
+         magnitudes across all test conditions.</p>
+
+      <h3>Controls</h3>
+      <ul>
+        <li><strong>x-axis</strong> — AoA, AoS, dR, dE, or V. More options than the
+            comparison tab because the propOff dataset covers a much wider test matrix.</li>
+        <li><strong>colour by</strong> — choose which dimension separates the lines:
+            V, dE, dR, or AoS. Each unique value in that dimension gets its own coloured line.</li>
+        <li><strong>V / fix AoA / fix AoS / fix dR / fix dE</strong> — same filtering
+            logic as the comparison tab. Set to <span class="help-tag muted">—</span> to
+            include all values (averaged at each x point).</li>
+        <li><strong>Actual x toggle</strong> — same as comparison tab. For AoA this switches
+            between AoA_round (grid) and AoA (raw measured). Note that AoA_FINAL is the
+            fully corrected angle including streamline-curvature, downwash, and tail corrections
+            — it can differ significantly from the raw AoA at high lift.</li>
+      </ul>
+
+      <h3>Metric tabs</h3>
+      <p>Same two groups as the comparison tab, but with an extra correction metric
+         <span class="help-tag green">Δα sc</span> (streamline-curvature AoA increment)
+         which is only meaningful for propOff since propOn uses a different CL source column.</p>
+
+      <h3>Tip — inspecting the drag polar</h3>
+      <p>Set x-axis = AoA, colour by = dE, fix AoS = 0°, and select CD or CD0 fit.
+         This gives you the drag polar family for each elevator setting at symmetric flight.</p>
+    </div>
+
+    <!-- STABILITY & CONTROL TAB -->
+    <div class="help-card">
+      <h2>Stability &amp; Control</h2>
+      <p>Extracts and plots aerodynamic stability and control derivatives fitted by linear
+         regression from the measurement data. All derivatives are in per-degree units.</p>
+
+      <h3>Plot types</h3>
+      <ul>
+        <li><strong>Cnβ vs AoA</strong> — directional stability derivative ∂Cn/∂β.
+            Fitted from CMyaw vs AoS at each (AoA, J, V, dR) condition.
+            More negative = more stable. Prop-on shown solid by J, prop-off dashed by V.</li>
+        <li><strong>Cyβ vs AoA</strong> — side-force stability ∂Cy/∂β.
+            Always positive (side force in direction of sideslip).</li>
+        <li><strong>Cn_dR vs AoA</strong> — rudder control power ∂Cn/∂δR.
+            Fitted from CMyaw vs dR. More negative = more effective rudder.</li>
+        <li><strong>Cy_dR vs AoA</strong> — side force due to rudder ∂Cy/∂δR.</li>
+        <li><strong>Cr_dR vs AoA</strong> — roll coupling from rudder ∂Cl/∂δR
+            (adverse/proverse yaw indicator).</li>
+        <li><strong>Drag polar</strong> — CL vs CD scatter for all conditions.
+            Overlays prop-on (coloured by J) and prop-off (grey). Shows how thrust shifts
+            the polar.</li>
+        <li><strong>Trim dR vs AoA</strong> — rudder deflection required to achieve
+            CMyaw = 0 (directional trim) at each AoA and J, found by linear interpolation.</li>
+        <li><strong>L/D at trim</strong> — lift-to-drag ratio at the trim dR condition.
+            Shows the aerodynamic performance penalty from trimming.</li>
+        <li><strong>CL at trim</strong> — lift coefficient at the trim condition.</li>
+      </ul>
+
+      <h3>Controls</h3>
+      <ul>
+        <li><strong>dataset</strong> — show prop-on, prop-off, or both.</li>
+        <li><strong>V</strong> — filter to a single tunnel speed.</li>
+        <li><strong>fix dR</strong> — for Cnβ plots, restrict to a specific rudder angle
+            (dR=0 gives the clean baseline).</li>
+        <li><strong>fix dE</strong> — for prop-off plots, restrict to a specific elevator angle.</li>
+        <li><strong>fix AoS</strong> — for dR-sweep plots (Cn_dR etc.), restrict to a specific
+            sideslip. AoS=0 gives the symmetric case.</li>
+        <li><strong>min R²</strong> — exclude fits with R² below the threshold.
+            Default 0.80. Lower values include noisier fits; raise to 0.90+ for publication quality.</li>
+      </ul>
+
+      <h3>Interpretation notes</h3>
+      <ul>
+        <li>PropOn Cnβ is only available at AoA=2.5° (the only AoA with a full AoS sweep
+            in the prop-on dataset). PropOff covers the full AoA range.</li>
+        <li>Trim dR values outside [−25°, 5°] are excluded as physically implausible
+            (outside the rudder deflection range).</li>
+        <li>The drag polar scatter plot intentionally shows all raw points rather than
+            averaged lines, so you can see the spread across conditions.</li>
+      </ul>
+    </div>
+      <h2>Correction Pipeline</h2>
+      <p>All data has passed through the following correction sequence before being
+         loaded into this tool. The _FINAL columns are the output of the last step.</p>
+
+      <h3>PropOff sequence</h3>
+      <ul>
+        <li>Model-off tare subtraction</li>
+        <li>Drag polar fit &nbsp;<span class="help-tag muted">CD = CD0 + k·CL²</span></li>
+        <li>Solid blockage &nbsp;<span class="help-tag muted">ε_sb = 0.006406642</span></li>
+        <li>Wake blockage &nbsp;<span class="help-tag muted">ε_wb = S/(4C)·CD0 + 5S/(4C)·CDsep</span></li>
+        <li>Combined blockage correction &nbsp;<span class="help-tag muted">C_corr = C / (1+ε)²</span></li>
+        <li>Streamline-curvature correction</li>
+        <li>Downwash correction</li>
+        <li>Tail-plane interference correction</li>
+      </ul>
+
+      <h3>PropOn additional steps</h3>
+      <ul>
+        <li>BEM thrust separation &nbsp;<span class="help-tag muted">CT_bem(J) polynomial</span></li>
+        <li>Slipstream blockage &nbsp;<span class="help-tag muted">ε_ss = −(Tc*/2√(1+2Tc·))·(S_prop/C)</span></li>
+      </ul>
+
+      <div class="help-formula">
+Blockage correction (velocity):   V_corr = V / (1 + ε_total)
+Blockage correction (coeff):      C_corr = C / (1 + ε_total)²
+CFt thrust: solid + wake only,    never slipstream (circular)
+      </div>
+    </div>
+
+    <!-- METRIC GLOSSARY -->
+    <div class="help-card">
+      <h2>Metric Glossary</h2>
+
+      <h3>Final coefficients</h3>
+      <ul>
+        <li><strong>CL</strong> — lift coefficient (aerodynamic only after BEM separation for propOn)</li>
+        <li><strong>CD</strong> — drag coefficient</li>
+        <li><strong>CMpitch</strong> — pitching moment coefficient</li>
+        <li><strong>CYaw</strong> — yaw force coefficient</li>
+        <li><strong>CMroll</strong> — rolling moment coefficient</li>
+        <li><strong>CMyaw</strong> — yawing moment coefficient</li>
+        <li><strong>CFt</strong> — propeller thrust force coefficient (propOn only, solid+wake blockage corrected)</li>
+      </ul>
+
+      <h3>Correction magnitudes</h3>
+      <ul>
+        <li><strong>ΔCL sc</strong> — CL increment from streamline-curvature correction</li>
+        <li><strong>ΔCD dw</strong> — CD increment from downwash correction</li>
+        <li><strong>ΔCM sc</strong> — CMpitch increment from streamline-curvature</li>
+        <li><strong>ΔCM tail</strong> — CMpitch increment from tail-plane interference</li>
+        <li><strong>Δα dw</strong> — AoA increment from downwash [deg]</li>
+        <li><strong>Δα tail</strong> — AoA increment from tail correction [deg]</li>
+        <li><strong>Δα sc</strong> — AoA increment from streamline-curvature [deg] (propOff only)</li>
+      </ul>
+
+      <h3>Blockage factors</h3>
+      <ul>
+        <li><strong>ε total</strong> — total blockage factor (sb + wb [+ ss for propOn])</li>
+        <li><strong>ε wake</strong> — wake blockage factor ε_wb</li>
+        <li><strong>ε slip</strong> — slipstream blockage factor ε_ss (propOn only, negative by design)</li>
+        <li><strong>Tc*</strong> — thrust loading T/(q·S_prop) driving slipstream blockage</li>
+        <li><strong>CLw ref</strong> — tail-off reference lift used to drive SC, downwash, and tail corrections</li>
+      </ul>
+
+      <h3>Drag polar fit</h3>
+      <ul>
+        <li><strong>CD0 fit</strong> — zero-lift drag from polar fit</li>
+        <li><strong>k fit</strong> — induced drag factor from polar fit</li>
+        <li><strong>R² fit</strong> — goodness of fit (values below ~0.85 indicate poor polar quality)</li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
-const CMP_DATA  = {json.dumps(cmp_rows, separators=(',', ':'))};
-const OFF_DATA  = {json.dumps(off_rows,  separators=(',', ':'))};
-const J_COLORS  = {json.dumps(j_colors)};
-const META      = {json.dumps(meta)};
+const CMP_DATA      = {json.dumps(cmp_rows,    separators=(',', ':'))};
+const OFF_DATA      = {json.dumps(off_rows,     separators=(',', ':'))};
+const J_COLORS      = {json.dumps(j_colors)};
+const META          = {json.dumps(meta)};
+const CN_BETA_ON    = {json.dumps(cn_beta_on,   separators=(',', ':'))};
+const CN_BETA_OFF   = {json.dumps(cn_beta_off,  separators=(',', ':'))};
+const CN_DR_ON      = {json.dumps(cn_dr_on,     separators=(',', ':'))};
+const CN_DR_OFF     = {json.dumps(cn_dr_off,    separators=(',', ':'))};
+const POLAR_ON      = {json.dumps(polar_on,     separators=(',', ':'))};
+const POLAR_OFF     = {json.dumps(polar_off,    separators=(',', ':'))};
+const TRIM_ROWS     = {json.dumps(trim_rows,    separators=(',', ':'))};
+const SC_META       = {json.dumps(sc_meta)};
+const J_PALETTE_SC  = {json.dumps(J_PALETTE)};
+const SC_OFF_PALETTE= ['#94a3b8','#cbd5e1','#64748b','#475569','#e2e8f0'];
 
 const CMP_METRICS = [
   {{key:'CL',        lbl:'CL',       on:'CL_on',      off:'CL_off',      grp:1}},
@@ -534,7 +1010,7 @@ const OFF_METRICS = [
   {{key:'R2',        lbl:'R² fit',    field:'R2',        grp:2}},
 ];
 
-let cChart = null, oChart = null;
+let cChart = null, oChart = null, scChart = null;
 let cMetric = 'CL', oMetric = 'CL';
 
 function switchPage(id, btn) {{
@@ -542,7 +1018,9 @@ function switchPage(id, btn) {{
   document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + id).classList.add('active');
   btn.classList.add('active');
-  if (id === 'cmp') renderCmp(); else renderOff();
+  if (id === 'cmp') renderCmp();
+  else if (id === 'off') renderOff();
+  else if (id === 'sc') renderSC();
 }}
 
 function avg(arr, key) {{
@@ -782,6 +1260,250 @@ function renderOff() {{
 }}
 function setOffMetric(k) {{ oMetric = k; renderOff(); }}
 
+// ── STABILITY & CONTROL ────────────────────────────────────────────────────
+function renderSC() {{
+  const plot   = sel('sc-plot');
+  const src    = sel('sc-src');
+  const vFil   = sel('sc-v');
+  const drFix  = sel('sc-dr');
+  const deFix  = sel('sc-de');
+  const aosFix = sel('sc-aos');
+  const r2min  = parseFloat(sel('sc-r2min')) || 0;
+
+  function fV(d)   {{ return isAll(vFil)  || d.V   === parseFloat(vFil);  }}
+  function fDR(d)  {{ return isAll(drFix) || d.dR  === parseFloat(drFix); }}
+  function fDE(d)  {{ return isAll(deFix) || d.dE  === parseFloat(deFix); }}
+  function fAoS(d) {{ return isAll(aosFix)|| d.AoS === parseFloat(aosFix);}}
+  function fR2(d, key) {{ return (d[key] === null || d[key] === undefined) ? false : d[key] >= r2min; }}
+
+  const palette  = ['#5b8af5','#3ecf8e','#f5a623','#f05252','#a78bfa','#fb7185','#34d399','#fbbf24'];
+  const offColor = '#94a3b8';
+
+  let datasets = [];
+  let xLabel   = 'AoA (°)';
+  let yLabel   = plot;
+  let metaNote = '';
+  let cards_html = '';
+
+  // ── Helper: build one line dataset grouped by groupKey ────────────────
+  function buildLines(rows, xKey, yKey, r2Key, groupFn, labelFn, colorFn) {{
+    const groups = {{}};
+    rows.forEach(r => {{
+      const k = groupFn(r);
+      if (!groups[k]) groups[k] = [];
+      groups[k].push(r);
+    }});
+    return Object.entries(groups).map(([k, pts]) => {{
+      const sorted = pts.sort((a,b) => a[xKey]-b[xKey]);
+      const data   = sorted
+        .filter(r => r2Key ? fR2(r, r2Key) : true)
+        .map(r => ({{x: r[xKey], y: r[yKey]}}))
+        .filter(p => p.x !== null && p.y !== null);
+      if (!data.length) return null;
+      return {{
+        label: labelFn(k, pts[0]),
+        data, parsing: false,
+        borderColor: colorFn(k, pts[0]),
+        backgroundColor: colorFn(k, pts[0]) + '25',
+        borderWidth: 2.5, pointRadius: 5, tension: .3, spanGaps: true,
+      }};
+    }}).filter(Boolean);
+  }}
+
+  // ── Cn_beta ──────────────────────────────────────────────────────────
+  if (plot === 'cn_beta' || plot === 'cy_beta') {{
+    const yKey  = plot === 'cn_beta' ? 'Cn_beta' : 'Cy_beta';
+    const r2Key = 'r2_cn';
+    yLabel = plot === 'cn_beta' ? 'Cnβ = ∂Cn/∂β  [deg⁻¹]' : 'Cyβ = ∂Cy/∂β  [deg⁻¹]';
+    metaNote = 'Linear fit of CMyaw vs AoS at each (AoA, J/dE, V, dR) condition. Filter by R² to exclude poor fits.';
+
+    if (src !== 'off') {{
+      const d = CN_BETA_ON.filter(r => fV(r) && fDR(r));
+      const jList = [...new Set(d.map(r=>r.J))].sort((a,b)=>a-b);
+      jList.forEach((j,i) => {{
+        const rows = d.filter(r => r.J === j);
+        if (!rows.length) return;
+        const sorted = rows.sort((a,b)=>a.AoA-b.AoA);
+        const pts = sorted.filter(r => r2Key ? fR2(r,r2Key) : true)
+                          .map(r => ({{x:r.AoA, y:r[yKey]}})).filter(p=>p.y!==null);
+        if (!pts.length) return;
+        datasets.push({{label:`prop-on J=${{j}}`, data:pts, parsing:false,
+          borderColor:palette[i%palette.length], backgroundColor:palette[i%palette.length]+'25',
+          borderWidth:2.5, pointRadius:6, tension:.3}});
+      }});
+    }}
+    if (src !== 'on') {{
+      const d = CN_BETA_OFF.filter(r => fV(r) && fDR(r) && fDE(r));
+      const vList = [...new Set(d.map(r=>r.V))].sort((a,b)=>a-b);
+      vList.forEach((v,i) => {{
+        const rows = d.filter(r => r.V === v);
+        const sorted = rows.sort((a,b)=>a.AoA-b.AoA);
+        const pts = sorted.filter(r => r2Key ? fR2(r,r2Key) : true)
+                          .map(r => ({{x:r.AoA, y:r[yKey]}})).filter(p=>p.y!==null);
+        if (!pts.length) return;
+        datasets.push({{label:`prop-off V=${{v}}`, data:pts, parsing:false,
+          borderColor:SC_OFF_PALETTE[i%SC_OFF_PALETTE.length],
+          backgroundColor:SC_OFF_PALETTE[i%SC_OFF_PALETTE.length]+'25',
+          borderWidth:1.5, pointRadius:3, tension:.3, borderDash:[4,3]}});
+      }});
+    }}
+    // summary cards — mean Cnbeta per J (propOn)
+    if (src !== 'off') {{
+      const d = CN_BETA_ON.filter(r => fV(r) && fDR(r) && (r2Key ? fR2(r,r2Key) : true));
+      const jList = [...new Set(d.map(r=>r.J))].sort((a,b)=>a-b);
+      cards_html = jList.map((j,i) => {{
+        const vals = d.filter(r=>r.J===j).map(r=>r[yKey]).filter(v=>v!==null);
+        if (!vals.length) return '';
+        const mean = vals.reduce((s,v)=>s+v,0)/vals.length;
+        return `<div class="card">
+          <div class="card-lbl"><span class="dot" style="background:${{palette[i%palette.length]}}"></span>J=${{j}} prop-on</div>
+          <div class="card-val">${{mean.toFixed(5)}}</div>
+          <div class="card-sub">mean ${{plot==='cn_beta'?'Cnβ':'Cyβ'}}</div></div>`;
+      }}).join('');
+    }}
+  }}
+
+  // ── Cn_dR / Cy_dR / Cr_dR ────────────────────────────────────────────
+  else if (['cn_dr','cy_dr','cr_dr'].includes(plot)) {{
+    const yKey  = plot === 'cn_dr' ? 'Cn_dR' : plot === 'cy_dr' ? 'Cy_dR' : 'Cr_dR';
+    const r2Key = 'r2_cn';
+    yLabel = plot === 'cn_dr' ? 'Cn_δR = ∂Cn/∂δR  [deg⁻¹]'
+           : plot === 'cy_dr' ? 'Cy_δR = ∂Cy/∂δR  [deg⁻¹]'
+           : 'Cr_δR = ∂Cl/∂δR  [deg⁻¹]';
+    metaNote = 'Linear fit of CMyaw vs dR at each (AoA, J, V, AoS) condition.';
+
+    if (src !== 'off') {{
+      const d = CN_DR_ON.filter(r => fV(r) && fAoS(r));
+      const jList = [...new Set(d.map(r=>r.J))].sort((a,b)=>a-b);
+      jList.forEach((j,i) => {{
+        const rows = d.filter(r=>r.J===j).sort((a,b)=>a.AoA-b.AoA);
+        const pts  = rows.filter(r=>fR2(r,r2Key)).map(r=>({{x:r.AoA,y:r[yKey]}})).filter(p=>p.y!==null);
+        if (!pts.length) return;
+        datasets.push({{label:`prop-on J=${{j}}`, data:pts, parsing:false,
+          borderColor:palette[i%palette.length], backgroundColor:palette[i%palette.length]+'25',
+          borderWidth:2.5, pointRadius:6, tension:.3}});
+      }});
+    }}
+    if (src !== 'on') {{
+      const d = CN_DR_OFF.filter(r => fV(r) && fAoS(r) && fDE(r));
+      const vList = [...new Set(d.map(r=>r.V))].sort((a,b)=>a-b);
+      vList.forEach((v,i) => {{
+        const rows = d.filter(r=>r.V===v).sort((a,b)=>a.AoA-b.AoA);
+        const pts  = rows.filter(r=>fR2(r,r2Key)).map(r=>({{x:r.AoA,y:r[yKey]}})).filter(p=>p.y!==null);
+        if (!pts.length) return;
+        datasets.push({{label:`prop-off V=${{v}}`, data:pts, parsing:false,
+          borderColor:SC_OFF_PALETTE[i%SC_OFF_PALETTE.length],
+          backgroundColor:SC_OFF_PALETTE[i%SC_OFF_PALETTE.length]+'25',
+          borderWidth:1.5, pointRadius:3, tension:.3, borderDash:[4,3]}});
+      }});
+    }}
+    if (src !== 'off') {{
+      const d = CN_DR_ON.filter(r=>fV(r)&&fAoS(r)&&fR2(r,'r2_cn'));
+      const jList = [...new Set(d.map(r=>r.J))].sort((a,b)=>a-b);
+      cards_html = jList.map((j,i) => {{
+        const vals = d.filter(r=>r.J===j).map(r=>r[yKey]).filter(v=>v!==null);
+        if (!vals.length) return '';
+        const mean = vals.reduce((s,v)=>s+v,0)/vals.length;
+        return `<div class="card">
+          <div class="card-lbl"><span class="dot" style="background:${{palette[i%palette.length]}}"></span>J=${{j}}</div>
+          <div class="card-val">${{mean.toFixed(5)}}</div>
+          <div class="card-sub">mean ${{yKey}}</div></div>`;
+      }}).join('');
+    }}
+  }}
+
+  // ── Drag polar ────────────────────────────────────────────────────────
+  else if (plot === 'polar') {{
+    xLabel = 'CD  (FINAL)';
+    yLabel = 'CL  (FINAL)';
+    metaNote = 'Drag polar: CL vs CD. All individual data points.';
+
+    if (src !== 'off') {{
+      const d = POLAR_ON.filter(r => fV(r) && (isAll(drFix)||r.dR===parseFloat(drFix)));
+      const jList = [...new Set(d.map(r=>r.J))].sort((a,b)=>a-b);
+      jList.forEach((j,i) => {{
+        const pts = d.filter(r=>r.J===j).map(r=>({{x:r.CD,y:r.CL}})).filter(p=>p.x!==null&&p.y!==null);
+        if (!pts.length) return;
+        datasets.push({{label:`prop-on J=${{j}}`, data:pts, parsing:false,
+          borderColor:palette[i%palette.length], backgroundColor:palette[i%palette.length]+'40',
+          borderWidth:0, pointRadius:5, showLine:false}});
+      }});
+    }}
+    if (src !== 'on') {{
+      const d = POLAR_OFF.filter(r => fV(r) && fDE(r) && (isAll(drFix)||r.dR===parseFloat(drFix)));
+      const pts = d.map(r=>({{x:r.CD,y:r.CL}})).filter(p=>p.x!==null&&p.y!==null);
+      if (pts.length) datasets.push({{label:'prop-off', data:pts, parsing:false,
+        borderColor:offColor, backgroundColor:offColor+'30',
+        borderWidth:0, pointRadius:2, showLine:false}});
+    }}
+    metaNote = 'Each point is one measurement. Filter by V and dR to isolate conditions.';
+  }}
+
+  // ── Trim dR / L/D / CL at trim ───────────────────────────────────────
+  else if (['trim_dr','trim_ld','trim_cl'].includes(plot)) {{
+    const yKey = plot==='trim_dr' ? 'dR_trim' : plot==='trim_ld' ? 'LD_trim' : 'CL_trim';
+    yLabel = plot==='trim_dr' ? 'Trim dR (°)' : plot==='trim_ld' ? 'L/D at trim' : 'CL at trim';
+    metaNote = 'Trim condition: dR at which CMyaw = 0, found by linear interpolation. AoS=0 recommended.';
+
+    const d = TRIM_ROWS.filter(r => fV(r) && fAoS(r));
+    const jList = [...new Set(d.map(r=>r.J))].sort((a,b)=>a-b);
+    jList.forEach((j,i) => {{
+      const rows = d.filter(r=>r.J===j).sort((a,b)=>a.AoA-b.AoA);
+      const pts  = rows.map(r=>({{x:r.AoA, y:r[yKey]}})).filter(p=>p.x!==null&&p.y!==null);
+      if (!pts.length) return;
+      datasets.push({{label:`J=${{j}}`, data:pts, parsing:false,
+        borderColor:palette[i%palette.length], backgroundColor:palette[i%palette.length]+'25',
+        borderWidth:2.5, pointRadius:6, tension:.3}});
+    }});
+    // cards
+    cards_html = jList.map((j,i) => {{
+      const vals = d.filter(r=>r.J===j).map(r=>r[yKey]).filter(v=>v!==null);
+      if (!vals.length) return '';
+      const mean = vals.reduce((s,v)=>s+v,0)/vals.length;
+      return `<div class="card">
+        <div class="card-lbl"><span class="dot" style="background:${{palette[i%palette.length]}}"></span>J=${{j}}</div>
+        <div class="card-val">${{mean.toFixed(3)}}</div>
+        <div class="card-sub">mean ${{yLabel}}</div></div>`;
+    }}).join('');
+  }}
+
+  // legend
+  const legEl = document.getElementById('sc-legend');
+  legEl.innerHTML = datasets.map(ds => {{
+    const isDash = (ds.borderDash && ds.borderDash.length);
+    return `<span class="leg-item">` +
+      (isDash
+        ? `<span style="display:inline-block;width:18px;height:0;border-top:2px dashed ${{ds.borderColor}};"></span>`
+        : `<span class="lsq" style="background:${{ds.borderColor}}"></span>`) +
+      `${{ds.label}}</span>`;
+  }}).join('');
+
+  document.getElementById('sc-cards').innerHTML = cards_html;
+  document.getElementById('sc-meta').textContent = metaNote;
+
+  const scType = (plot === 'polar') ? 'scatter' : 'line';
+  if (scChart) scChart.destroy();
+  scChart = new Chart(document.getElementById('sc-chart'), {{
+    type: scType,
+    data: {{datasets}},
+    options: {{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{{
+        legend:{{display:false}},
+        tooltip:{{callbacks:{{label:c=>`${{c.dataset.label}}: (${{c.parsed.x?.toFixed(4)}}, ${{c.parsed.y?.toFixed(5)}}) `}}}},
+      }},
+      scales:{{
+        x:{{type:'linear', title:{{display:true,text:xLabel,color:'#6b7094',font:{{size:11,family:"'IBM Plex Mono'"}}}},
+             ticks:{{color:'#6b7094',font:{{size:10,family:"'IBM Plex Mono'"}}}},
+             grid:{{color:'rgba(255,255,255,0.04)'}}}},
+        y:{{title:{{display:true,text:yLabel,color:'#6b7094',font:{{size:11,family:"'IBM Plex Mono'"}}}},
+             ticks:{{color:'#6b7094',font:{{size:10,family:"'IBM Plex Mono'"}},callback:v=>v.toFixed(4)}},
+             grid:{{color:'rgba(255,255,255,0.04)'}}}},
+      }},
+    }},
+  }});
+}}
+
 // ── EVENT LISTENERS ─────────────────────────────────────────────────────────
 ['c-xax','c-j','c-v','c-aoa','c-aos','c-dr'].forEach(id =>
   document.getElementById(id).addEventListener('change', renderCmp));
@@ -790,6 +1512,9 @@ document.getElementById('c-actual').addEventListener('change', renderCmp);
 ['o-xax','o-color','o-v','o-aoa','o-aos','o-dr','o-de'].forEach(id =>
   document.getElementById(id).addEventListener('change', renderOff));
 document.getElementById('o-actual').addEventListener('change', renderOff);
+
+['sc-plot','sc-src','sc-v','sc-dr','sc-de','sc-aos','sc-r2min'].forEach(id =>
+  document.getElementById(id).addEventListener('change', renderSC));
 
 renderCmp();
 </script>
@@ -827,8 +1552,13 @@ def main():
     print(f"  propOn  : {propon_path}")
     print(f"  propOff : {propoff_path}")
 
-    cmp_rows, off_rows, meta, j_colors, v_colors = load_and_build(propon_path, propoff_path)
-    generate_html(cmp_rows, off_rows, meta, j_colors, v_colors, out_path)
+    (cmp_rows, off_rows, meta, j_colors, v_colors,
+     cn_beta_on, cn_beta_off, cn_dr_on, cn_dr_off,
+     polar_on, polar_off, trim_rows, sc_meta) = load_and_build(propon_path, propoff_path)
+
+    generate_html(cmp_rows, off_rows, meta, j_colors, v_colors,
+                  cn_beta_on, cn_beta_off, cn_dr_on, cn_dr_off,
+                  polar_on, polar_off, trim_rows, sc_meta, out_path)
     print("Done.\n")
 
 

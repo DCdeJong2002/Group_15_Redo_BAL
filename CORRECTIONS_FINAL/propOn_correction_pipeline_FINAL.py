@@ -338,12 +338,16 @@ if __name__ == "__main__":
 
     BASE_DIR = Path(__file__).resolve().parent
 
-    cmp_rows, off_rows, meta, j_colors, v_colors = load_and_build(
+    (cmp_rows, off_rows, meta, j_colors, v_colors,
+    cn_beta_on, cn_beta_off, cn_dr_on, cn_dr_off,
+    polar_on, polar_off, trim_rows, sc_meta) = load_and_build(
         propon_path  = BASE_DIR / "results_propOn_FINAL" / "propOn_final.csv",
         propoff_path = BASE_DIR / "results_propOff_FINAL" / "propOff_final.csv",
     )
 
     generate_html(
         cmp_rows, off_rows, meta, j_colors, v_colors,
+        cn_beta_on, cn_beta_off, cn_dr_on, cn_dr_off,
+        polar_on, polar_off, trim_rows, sc_meta,
         out_path = BASE_DIR / "results_propOn_FINAL" / "comparison_extended.html",
     )

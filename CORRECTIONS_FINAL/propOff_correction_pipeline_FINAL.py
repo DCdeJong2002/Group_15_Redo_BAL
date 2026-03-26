@@ -7,6 +7,8 @@ from TAILOFF_correction_pipeline_FINAL import run_tailoff_workflow
 
 def run_propoff_workflow(
     save_outputs: bool = True,
+    save_final_output: bool = True,
+    verbose_flag: bool = True,
     apply_modeloff: bool = True,
     apply_solid_blockage: bool = True,
     apply_wake_blockage: bool = True,
@@ -42,8 +44,12 @@ def run_propoff_workflow(
     active_cols = {
         "CL":      "CL",
         "CD":      "CD",
-        "AoA":     "AoA",
+        "CYaw":    "CYaw",
         "CMpitch": "CMpitch",
+        "CMroll":  "CMroll",
+        "CMyaw":   "CMyaw",
+        "AoA":     "AoA",
+        "V":       "V",
     }
 
     # ------------------------------------------------------------
@@ -116,12 +122,16 @@ def run_propoff_workflow(
     if apply_solid_blockage or apply_wake_blockage:
         active_cols["CL"]      = f"{active_cols['CL']}_blockage_corr"
         active_cols["CD"]      = f"{active_cols['CD']}_blockage_corr"
+        active_cols["CYaw"]    = f"{active_cols['CYaw']}_blockage_corr"
         active_cols["CMpitch"] = f"{active_cols['CMpitch']}_blockage_corr"
+        active_cols["CMroll"]  = f"{active_cols['CMroll']}_blockage_corr"
+        active_cols["CMyaw"]   = f"{active_cols['CMyaw']}_blockage_corr"
+        active_cols["V"]       = f"{active_cols['V']}_blockage_corr"
 
     # ------------------------------------------------------------
     # Tail-off data needed for SC / downwash / tail correction
     # ------------------------------------------------------------
-    tailoff, _, _, _ = run_tailoff_workflow(save_outputs=False)
+    tailoff,_,_,_ = run_tailoff_workflow(save_outputs=False)
 
     # ------------------------------------------------------------
     # Optional streamline-curvature correction
@@ -135,6 +145,7 @@ def run_propoff_workflow(
             filename="propOff_streamline_curvature_corrected.csv"
         )
         outputs["streamline_curvature_corrected"] = current_df.copy()
+        active_cols["CL"]     = f"{active_cols['CL']}_sc_corr"
         active_cols["AoA"]     = f"{active_cols['AoA']}_sc_corr"
         active_cols["CMpitch"] = f"{active_cols['CMpitch']}_sc_corr"
 
@@ -151,6 +162,7 @@ def run_propoff_workflow(
         )
         outputs["downwash_corrected"] = current_df.copy()
         active_cols["AoA"] = f"{active_cols['AoA']}_dw_corr"
+        active_cols["CD"]  = f"{active_cols['CD']}_dw_corr"
 
     # ------------------------------------------------------------
     # Optional tail correction
@@ -164,11 +176,26 @@ def run_propoff_workflow(
             filename="propOff_tail_corrected.csv"
         )
         outputs["tail_corrected"] = current_df.copy()
+        active_cols["AoA"]     = f"{active_cols['AoA']}_tail_corr"
+        active_cols["CMpitch"] = f"{active_cols['CMpitch']}_tail_corr"
 
-    current_df = propoff.rename_detected_final_force_moment_columns(
-        save_csv=save_outputs,
+    current_df = propoff.create_final_output_df(
+        active_columns={
+            "CL":      active_cols["CL"],
+            "CD":      active_cols["CD"],
+            "CYaw":    active_cols["CYaw"],
+            "CMpitch": active_cols["CMpitch"],
+            "CMroll":  active_cols["CMroll"],
+            "CMyaw":   active_cols["CMyaw"],
+            "AoA":     active_cols["AoA"],
+            "V":       active_cols["V"],
+        },
+        save_csv=save_final_output,
         filename="propOff_final.csv",
-        verbose=True
+        save_slim=save_final_output,
+        slim_filename="propOff_final_slim.csv",
+        verbose=verbose_flag,
+        print_corrections=verbose_flag,
     )
 
     return propoff, current_df, outputs
@@ -177,6 +204,8 @@ def run_propoff_workflow(
 if __name__ == "__main__":
     propoff, df_final, outputs = run_propoff_workflow(
         save_outputs=True,
+        save_final_output=True,
+        verbose_flag=True,
         apply_modeloff=True,
         apply_solid_blockage=True,
         apply_wake_blockage=True,

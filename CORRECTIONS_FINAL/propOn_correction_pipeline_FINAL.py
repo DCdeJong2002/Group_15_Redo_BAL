@@ -9,6 +9,8 @@ from propOff_correction_pipeline_FINAL import run_propoff_workflow
 
 def run_propon_workflow(
     save_outputs: bool = True,
+    save_final_output: bool = True,
+    verbose_flag: bool = True,
     recompute_thrust_separation_BEM: bool = True,
     recompute_cd_for_thrust_sep: bool = True,
     recompute_cl_for_thrust_sep: bool = True,
@@ -58,9 +60,12 @@ def run_propon_workflow(
         "CL":      "CL",
         "CD":      "CD",
         "CYaw":    "CYaw",
-        "CFt":     None,         # produced by BEM separation, None until then
-        "AoA":     "AoA",
         "CMpitch": "CMpitch",
+        "CMroll":  "CMroll",
+        "CMyaw":   "CMyaw",
+        "AoA":     "AoA",
+        "V":       "V",
+        "CFt":     None,
     }
 
     # ------------------------------------------------------------
@@ -113,9 +118,9 @@ def run_propon_workflow(
             "CD":      active_cols["CD"],
             "CL":      active_cols["CL"],
             "CYaw":    active_cols["CYaw"],
-            "CMroll":  "CMroll",
+            "CMroll":  active_cols["CMroll"],
             "CMpitch": active_cols["CMpitch"],
-            "CMyaw":   "CMyaw",
+            "CMyaw":   active_cols["CMyaw"],
         }
 
         current_df = propon.apply_modeloff_correction(
@@ -131,8 +136,10 @@ def run_propon_workflow(
     # ------------------------------------------------------------
     # Get prop-off workflow results (needed for CD polar fit parameters)
     # ------------------------------------------------------------
-    propoff, df_propoff_final, propoff_outputs = run_propoff_workflow(
+    propoff,_,_ = run_propoff_workflow(
         save_outputs=False,
+        save_final_output=False,
+        verbose_flag=False,
         apply_modeloff=True,
         apply_solid_blockage=True,
         apply_wake_blockage=True,
@@ -161,7 +168,7 @@ def run_propon_workflow(
     # Compute blockage factors
     # ------------------------------------------------------------
     current_df = propon.compute_solid_blockage_e(
-        save_csv=False,
+        save_csv=save_outputs,
         filename="propOn_solid_blockage_e.csv"
     )
     outputs["solid_blockage_e"] = current_df.copy()
@@ -171,7 +178,7 @@ def run_propon_workflow(
         cd_col=active_cols["CD"],
         cl_col=active_cols["CL"],
         k_col="k_fit",
-        save_csv=False,
+        save_csv=save_outputs,
         filename="propOn_wake_blockage_e.csv"
     )
     outputs["wake_blockage_e"] = current_df.copy()
@@ -179,7 +186,7 @@ def run_propon_workflow(
     current_df = propon.compute_slipstream_blockage_e(
         tc_col="Tc_star_BEM",
         output_col="ess",
-        save_csv=False,
+        save_csv=save_outputs,
         filename="propOn_slipstream_blockage_e.csv"
     )
     outputs["slipstream_blockage_e"] = current_df.copy()
@@ -205,8 +212,8 @@ def run_propon_workflow(
             active_cols["CD"],
             active_cols["CYaw"],
             active_cols["CMpitch"],
-            "CMroll",
-            "CMyaw",
+            active_cols["CMroll"],
+            active_cols["CMyaw"],
         ),
         cft_thrust_col=active_cols["CFt"] if active_cols["CFt"] is not None else "",
         suffix="blockage_corr",
@@ -222,6 +229,9 @@ def run_propon_workflow(
         active_cols["CD"]      = f"{active_cols['CD']}_blockage_corr"
         active_cols["CYaw"]    = f"{active_cols['CYaw']}_blockage_corr"
         active_cols["CMpitch"] = f"{active_cols['CMpitch']}_blockage_corr"
+        active_cols["CMroll"]  = f"{active_cols['CMroll']}_blockage_corr"
+        active_cols["CMyaw"]   = f"{active_cols['CMyaw']}_blockage_corr"
+        active_cols["V"]       = f"{active_cols['V']}_blockage_corr"
 
     if active_cols["CFt"] is not None and (apply_solid_blockage or apply_wake_blockage):
         active_cols["CFt"] = f"{active_cols['CFt']}_blockage_corr"
@@ -245,6 +255,7 @@ def run_propon_workflow(
         outputs["streamline_curvature"] = current_df.copy()
         active_cols["AoA"]     = f"{active_cols['AoA']}_sc_corr"
         active_cols["CMpitch"] = f"{active_cols['CMpitch']}_sc_corr"
+        active_cols["CL"]     = f"{active_cols['CL']}_sc_corr"
 
     # ------------------------------------------------------------
     # Optional downwash correction
@@ -259,6 +270,7 @@ def run_propon_workflow(
         )
         outputs["downwash"] = current_df.copy()
         active_cols["AoA"] = f"{active_cols['AoA']}_dw_corr"
+        active_cols["CD"]  = f"{active_cols['CD']}_dw_corr"
 
     # ------------------------------------------------------------
     # Optional tail correction
@@ -272,11 +284,31 @@ def run_propon_workflow(
             filename="propOn_tail_corrected.csv"
         )
         outputs["tail_correction"] = current_df.copy()
+        active_cols["AoA"]     = f"{active_cols['AoA']}_tail_corr"
+        active_cols["CMpitch"] = f"{active_cols['CMpitch']}_tail_corr"
 
-    current_df = propon.rename_detected_final_force_moment_columns(
-        save_csv=True,
+
+    active_columns_map = {
+        "CL":      active_cols["CL"],
+        "CD":      active_cols["CD"],
+        "CYaw":    active_cols["CYaw"],
+        "CMpitch": active_cols["CMpitch"],
+        "CMroll":  active_cols["CMroll"],
+        "CMyaw":   active_cols["CMyaw"],
+        "AoA":     active_cols["AoA"],
+        "V":       active_cols["V"],
+    }
+    if active_cols["CFt"] in propon.df.columns:
+        active_columns_map["CFt"] = active_cols["CFt"]
+
+    current_df = propon.create_final_output_df(
+        active_columns=active_columns_map,
+        save_csv=save_final_output,
         filename="propOn_final.csv",
-        verbose=True
+        save_slim=save_final_output,
+        slim_filename="propOn_final_slim.csv",
+        verbose=verbose_flag,
+        print_corrections=verbose_flag,
     )
 
     return propon, current_df, outputs
@@ -285,6 +317,8 @@ def run_propon_workflow(
 if __name__ == "__main__":
     propon, df_final, outputs = run_propon_workflow(
         save_outputs=True,
+        save_final_output=True,
+        verbose_flag=True,
         recompute_thrust_separation_BEM=True,
         recompute_cd_for_thrust_sep=True,
         recompute_cl_for_thrust_sep=True,
@@ -299,14 +333,17 @@ if __name__ == "__main__":
         save_directory="results_propOn_FINAL"
     )
     
-    import sys
-    import subprocess
+    from generate_comparison_html_extended import load_and_build, generate_html
     from pathlib import Path
+
     BASE_DIR = Path(__file__).resolve().parent
-    subprocess.run([
-        sys.executable,                                                          # same Python that ran this script
-        str(BASE_DIR / "generate_comparison_html.py"),                          # absolute path to the generator
-        "--propon",  str(BASE_DIR / "results_propOn_FINAL" / "propOn_final.csv"),
-        "--propoff", str(BASE_DIR / "results_propOff_FINAL"    / "propOff_final.csv"),
-        "--out",     str(BASE_DIR / "results_propOn_FINAL" / "comparison.html"),
-    ], check=True)
+
+    cmp_rows, off_rows, meta, j_colors, v_colors = load_and_build(
+        propon_path  = BASE_DIR / "results_propOn_FINAL" / "propOn_final.csv",
+        propoff_path = BASE_DIR / "results_propOff_FINAL" / "propOff_final.csv",
+    )
+
+    generate_html(
+        cmp_rows, off_rows, meta, j_colors, v_colors,
+        out_path = BASE_DIR / "results_propOn_FINAL" / "comparison_extended.html",
+    )

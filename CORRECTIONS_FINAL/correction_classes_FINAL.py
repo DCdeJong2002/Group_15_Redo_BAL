@@ -1382,7 +1382,7 @@ class BaseCorrector:
         recompute_cd: bool = True,
         recompute_cl: bool = True,
         recompute_cyaw: bool = True,
-        exp_ct_path: str | Path = "Ct_V_exp_data.csv",
+        exp_ct_path: str | Path = None,
         extrap_velocities: frozenset[float] = frozenset({20., 40.}),
         extrap_j_min: float = 1.6,
         extrap_j_max: float = 2.8,
@@ -1501,6 +1501,9 @@ class BaseCorrector:
             [ct_col_on, aoa_col_on, aos_col_on, "J", "V", "rho", "q", "CN", "CY", "CT"],
             context="compute_thrust_separation_exp",
         )
+
+        if exp_ct_path is None:
+            raise ValueError("exp_ct_path is not provided, provide the path to the C_T digitized data")
     
         # ------------------------------------------------------------------
         # Parse the WebPlotDigitizer CSV into {V_value: (J_arr, CT_arr)}
@@ -3277,7 +3280,239 @@ class PropOnData(BaseCorrector):
 
         return self.df
 
-
+    def compute_delta_CT_from_propoff(
+        self,
+        df_propoff: pd.DataFrame,
+        ct_col_on: str = "CT",
+        cl_col_off: str = "CL",
+        cd_col_off: str = "CD",
+        cyaw_col_off: str = "CYaw",
+        aoa_col: str = "AoA_round",
+        aos_col: str = "AoS_round",
+        v_col: str = "V_round",
+        dr_col: str = "dR",
+        de_col: str = "dE",
+        S_wing: float = None,
+        S_prop: float = None,
+        D: float = None,
+        n_props: int = None,
+        save_csv: bool = False,
+        filename: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Compute the net propeller axial force as the difference in body-frame
+        axial force coefficient CT between the prop-on and prop-off conditions.
+        Convert this delta to a standard propeller thrust coefficient CT_props.
+    
+        Only rows where AoS_round == 0, dR == 0, and dE == 0 are computed;
+        all other rows receive NaN in the output columns.
+    
+        The prop-off CT is recovered by inverting the wind-axis transformation:
+    
+            CT_propoff = -CL * sin(alpha) + (CD * cos(beta) - CYaw * sin(beta)) * cos(alpha)
+    
+        where alpha = AoA_round [deg -> rad], beta = AoS_round [deg -> rad].
+    
+        The net propeller axial force coefficient (referenced to wing area):
+    
+            delta_CT = CT_propon - CT_propoff
+    
+        Standard propeller thrust coefficient (per propeller, referenced to
+        propeller disc area and rotational speed):
+    
+            CT_props = -delta_CT * q * S_wing / (rho * n_rps^2 * D^4 * n_props)
+    
+        The negative sign reflects the convention that thrust opposes drag
+        (delta_CT is negative when thrust dominates, CT_props is positive).
+    
+        Parameters
+        ----------
+        df_propoff : pd.DataFrame
+            Prop-off dataset containing at minimum: AoA (raw), AoS (raw),
+            V (raw), dR, dE, and the wind-axis force columns CL, CD, CYaw.
+            Does NOT need to have AoA_round / V_round pre-computed.
+        ct_col_on : str
+            Column in self.df with the measured body-frame axial force
+            coefficient. Default: "CT".
+        cl_col_off, cd_col_off, cyaw_col_off : str
+            Column names in df_propoff for lift, drag, and yaw force
+            coefficients. Defaults: "CL", "CD", "CYaw".
+        aoa_col : str
+            Rounded AoA column used for matching. Default: "AoA_round".
+        aos_col : str
+            Rounded AoS column used for matching. Default: "AoS_round".
+        v_col : str
+            Rounded velocity column used for matching. Default: "V_round".
+        dr_col : str
+            Rudder deflection column. Default: "dR".
+        de_col : str
+            Elevator deflection column. Default: "dE".
+        S_wing : float, optional
+            Wing reference area [m^2]. Defaults to WING_AREA.
+        S_prop : float, optional
+            Single propeller disc area [m^2]. Defaults to PROP_AREA.
+        D : float, optional
+            Propeller diameter [m]. Defaults to PROP_DIAMETER.
+        n_props : int, optional
+            Number of propellers. Defaults to N_PROPS.
+        save_csv : bool
+            If True, write the updated self.df to disk.
+        filename : str, optional
+            Override output filename.
+    
+        Returns
+        -------
+        pd.DataFrame
+            self.df with the following new columns:
+    
+            - CT_propoff_inv     body-frame CT recovered from prop-off CL/CD/CYaw
+            - delta_CT           CT_propon - CT_propoff_inv  (prop net axial force)
+            - CT_props_delta     standard propeller CT from delta_CT
+            - propoff_match_found  bool flag: True where a prop-off match existed
+        """
+        S_wing  = S_wing  if S_wing  is not None else self.WING_AREA
+        S_prop  = S_prop  if S_prop  is not None else self.PROP_AREA
+        D       = D       if D       is not None else self.PROP_DIAMETER
+        n_props = n_props if n_props is not None else self.N_PROPS
+    
+        df_on = self.df.copy()
+    
+        # ------------------------------------------------------------------
+        # Validate required columns in prop-on df
+        # ------------------------------------------------------------------
+        self.require_columns(
+            df_on,
+            [ct_col_on, aoa_col, aos_col, v_col, dr_col, de_col, "q", "rho", "J"],
+            context="compute_delta_CT_from_propoff (prop-on)",
+        )
+    
+        # ------------------------------------------------------------------
+        # Prepare prop-off df: add rounded keys if not present
+        # ------------------------------------------------------------------
+        df_off = df_propoff.copy()
+    
+        if "AoA_round" not in df_off.columns:
+            df_off["AoA_round"] = self.round_to_half(df_off["AoA"])
+        if "AoS_round" not in df_off.columns:
+            df_off["AoS_round"] = self.round_to_half(df_off["AoS"])
+        if "V_round" not in df_off.columns:
+            df_off["V_round"] = df_off["V"].round().astype(int)
+    
+        self.require_columns(
+            df_off,
+            [cl_col_off, cd_col_off, cyaw_col_off, "AoA_round", "AoS_round",
+            "V_round", dr_col, de_col],
+            context="compute_delta_CT_from_propoff (prop-off)",
+        )
+    
+        # ------------------------------------------------------------------
+        # Invert wind-axis transform on prop-off to recover CT_propoff
+        #
+        #   CT_propoff = -CL*sin(alpha) + (CD*cos(beta) - CYaw*sin(beta))*cos(alpha)
+        # ------------------------------------------------------------------
+        alpha_off = np.deg2rad(pd.to_numeric(df_off["AoA_round"], errors="coerce"))
+        beta_off  = np.deg2rad(pd.to_numeric(df_off["AoS_round"], errors="coerce"))
+    
+        CL_off   = pd.to_numeric(df_off[cl_col_off],   errors="coerce")
+        CD_off   = pd.to_numeric(df_off[cd_col_off],   errors="coerce")
+        CYaw_off = pd.to_numeric(df_off[cyaw_col_off], errors="coerce")
+    
+        df_off["CT_inv"] = (
+            -CL_off * np.sin(alpha_off)
+            + (CD_off * np.cos(beta_off) - CYaw_off * np.sin(beta_off)) * np.cos(alpha_off)
+        )
+    
+        # ------------------------------------------------------------------
+        # Build prop-off lookup: average CT_inv per (AoA_round, AoS_round,
+        # V_round, dR, dE) — only rows with dR==0, dE==0
+        # ------------------------------------------------------------------
+        df_off_clean = df_off[
+            (df_off[dr_col] == 0) & (df_off[de_col] == 0)
+        ].copy()
+    
+        lookup_keys = ["AoA_round", "AoS_round", "V_round"]
+        ct_off_lookup = (
+            df_off_clean
+            .groupby(lookup_keys, as_index=False)["CT_inv"]
+            .mean()
+            .rename(columns={"CT_inv": "CT_propoff_inv"})
+        )
+    
+        # ------------------------------------------------------------------
+        # Initialise output columns
+        # ------------------------------------------------------------------
+        df_on["CT_propoff_inv"]    = np.nan
+        df_on["delta_CT"]          = np.nan
+        df_on["CT_props_delta"]    = np.nan
+        df_on["propoff_match_found"] = False
+    
+        # ------------------------------------------------------------------
+        # Only compute for rows where AoS_round==0, dR==0, dE==0
+        # ------------------------------------------------------------------
+        valid_mask = (
+            (pd.to_numeric(df_on[aos_col],  errors="coerce") == 0) &
+            (pd.to_numeric(df_on[dr_col],   errors="coerce") == 0) &
+            (pd.to_numeric(df_on[de_col],   errors="coerce") == 0)
+        )
+    
+        df_valid = df_on[valid_mask].copy()
+    
+        if df_valid.empty:
+            print("compute_delta_CT_from_propoff: no rows with AoS_round==0, dR==0, dE==0 found.")
+            self.df = df_on
+            return self.df
+    
+        # ------------------------------------------------------------------
+        # Merge prop-off CT onto valid prop-on rows
+        # ------------------------------------------------------------------
+        df_valid = df_valid.merge(
+            ct_off_lookup,
+            on=lookup_keys,
+            how="left",
+        )
+    
+        match_mask = df_valid["CT_propoff_inv"].notna()
+        df_valid["propoff_match_found"] = match_mask
+    
+        # ------------------------------------------------------------------
+        # delta_CT  = CT_propon - CT_propoff
+        # ------------------------------------------------------------------
+        CT_on  = pd.to_numeric(df_valid[ct_col_on],       errors="coerce")
+        CT_off = pd.to_numeric(df_valid["CT_propoff_inv"], errors="coerce")
+    
+        df_valid["delta_CT"] = CT_on - CT_off
+    
+        # ------------------------------------------------------------------
+        # CT_props = -delta_CT * q * S_wing / (rho * n_rps^2 * D^4 * n_props)
+        #
+        # n_rps = V / (J * D)  [rev/s]
+        # ------------------------------------------------------------------
+        q   = pd.to_numeric(df_valid["q"],   errors="coerce")
+        rho = pd.to_numeric(df_valid["rho"], errors="coerce")
+        J   = pd.to_numeric(df_valid["J"],   errors="coerce")
+        V   = pd.to_numeric(df_valid["V"],   errors="coerce")
+    
+        J_safe = J.replace(0, np.nan)
+        n_rps  = V / (J_safe * D)
+    
+        df_valid["CT_props_delta"] = (
+            -df_valid["delta_CT"] * q * S_wing
+            / (rho * n_rps**2 * D**4 * n_props)
+        )
+    
+        # ------------------------------------------------------------------
+        # Write computed columns back into df_on at the correct indices
+        # ------------------------------------------------------------------
+        for col in ["CT_propoff_inv", "delta_CT", "CT_props_delta", "propoff_match_found"]:
+            df_on.loc[df_valid.index, col] = df_valid[col].values
+    
+        self.df = df_on
+    
+        if save_csv:
+            self.save_df(self.df, filename or "propOn_delta_CT.csv")
+    
+        return self.df
+    
 # ============================================================
 # Tail-off data
 # ============================================================

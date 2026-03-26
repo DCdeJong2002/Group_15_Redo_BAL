@@ -12,6 +12,7 @@ def run_propon_workflow(
     save_final_output: bool = True,
     verbose_flag: bool = True,
     recompute_thrust_separation: bool = True,
+    ct_corr_type: str = "EXP", #choose from "EXP" or "BEM"
     recompute_cd_for_thrust_sep: bool = True,
     recompute_cl_for_thrust_sep: bool = True,
     recompute_cyaw_for_thrust_sep: bool = True,
@@ -22,7 +23,6 @@ def run_propon_workflow(
     apply_streamline_curvature: bool = True,
     apply_downwash: bool = True,
     apply_tail_correction: bool = True,
-    ct_corr_type: bool = False,
     save_directory: str = "results_propOn"
 ):
     """
@@ -98,12 +98,9 @@ def run_propon_workflow(
                 recompute_cd=recompute_cd_for_thrust_sep,
                 recompute_cl=recompute_cl_for_thrust_sep,
                 recompute_cyaw=recompute_cyaw_for_thrust_sep,
-            )
+        )
         
         outputs["thrust_separation_EXP"] = current_df.copy()
-
-
-
 
 
     if ct_corr_type=="BEM":
@@ -337,7 +334,8 @@ if __name__ == "__main__":
         save_outputs=True,
         save_final_output=True,
         verbose_flag=True,
-        recompute_thrust_separation_BEM=True,
+        recompute_thrust_separation=True,
+        ct_corr_type="EXP",
         recompute_cd_for_thrust_sep=True,
         recompute_cl_for_thrust_sep=True,
         recompute_cyaw_for_thrust_sep=True,
@@ -351,21 +349,23 @@ if __name__ == "__main__":
         save_directory="results_propOn_FINAL"
     )
     
-    from generate_comparison_html_extended import load_and_build, generate_html
-    from pathlib import Path
 
-    BASE_DIR = Path(__file__).resolve().parent
+    if False:
+        from generate_comparison_html_extended import load_and_build, generate_html
+        from pathlib import Path
 
-    (cmp_rows, off_rows, meta, j_colors, v_colors,
-    cn_beta_on, cn_beta_off, cn_dr_on, cn_dr_off,
-    polar_on, polar_off, trim_rows, sc_meta) = load_and_build(
-        propon_path  = BASE_DIR / "results_propOn_FINAL" / "propOn_final.csv",
-        propoff_path = BASE_DIR / "results_propOff_FINAL" / "propOff_final.csv",
-    )
+        BASE_DIR = Path(__file__).resolve().parent
 
-    generate_html(
-        cmp_rows, off_rows, meta, j_colors, v_colors,
+        (cmp_rows, off_rows, meta, j_colors, v_colors,
         cn_beta_on, cn_beta_off, cn_dr_on, cn_dr_off,
-        polar_on, polar_off, trim_rows, sc_meta,
-        out_path = BASE_DIR / "results_propOn_FINAL" / "comparison_extended.html",
-    )
+        polar_on, polar_off, trim_rows, sc_meta) = load_and_build(
+            propon_path  = BASE_DIR / "results_propOn_FINAL" / "propOn_final.csv",
+            propoff_path = BASE_DIR / "results_propOff_FINAL" / "propOff_final.csv",
+        )
+
+        generate_html(
+            cmp_rows, off_rows, meta, j_colors, v_colors,
+            cn_beta_on, cn_beta_off, cn_dr_on, cn_dr_off,
+            polar_on, polar_off, trim_rows, sc_meta,
+            out_path = BASE_DIR / "results_propOn_FINAL" / "comparison_extended.html",
+        )

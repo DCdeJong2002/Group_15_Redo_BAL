@@ -11,7 +11,7 @@ def run_propon_workflow(
     save_outputs: bool = True,
     save_final_output: bool = True,
     verbose_flag: bool = True,
-    recompute_thrust_separation_BEM: bool = True,
+    recompute_thrust_separation: bool = True,
     recompute_cd_for_thrust_sep: bool = True,
     recompute_cl_for_thrust_sep: bool = True,
     recompute_cyaw_for_thrust_sep: bool = True,
@@ -22,6 +22,7 @@ def run_propon_workflow(
     apply_streamline_curvature: bool = True,
     apply_downwash: bool = True,
     apply_tail_correction: bool = True,
+    ct_corr_type: bool = False,
     save_directory: str = "results_propOn"
 ):
     """
@@ -85,7 +86,7 @@ def run_propon_workflow(
     # ------------------------------------------------------------
     # Compute BEM thrust separation BEFORE model-off correction
     # ------------------------------------------------------------
-    if recompute_thrust_separation_BEM:
+    if recompute_thrust_separation:
         current_df = propon.compute_thrust_separation_BEM(
             recompute_cd=recompute_cd_for_thrust_sep,
             recompute_cl=recompute_cl_for_thrust_sep,
@@ -93,18 +94,35 @@ def run_propon_workflow(
         )
         outputs["thrust_separation_BEM"] = current_df.copy()
 
-        # BEM separation produces aerodynamic-only columns; update active_cols
-        # to point at those so all downstream steps use the correct inputs.
-        # CFt_thrust_BEM is always produced by BEM separation.
-        active_cols["CFt"] = "CFt_thrust_BEM"
+        current_df = propon.compute_thrust_separation_EXP(
+                recompute_cd=recompute_cd_for_thrust_sep,
+                recompute_cl=recompute_cl_for_thrust_sep,
+                recompute_cyaw=recompute_cyaw_for_thrust_sep,
+            )
+        
+        outputs["thrust_separation_EXP"] = current_df.copy()
 
+
+
+
+
+    if ct_corr_type=="BEM":
+        active_cols["CFt"] = "CFt_thrust_BEM"
         if recompute_cd_for_thrust_sep:
             active_cols["CD"] = "CD_aero_BEM"
         if recompute_cl_for_thrust_sep:
             active_cols["CL"] = "CL_aero_BEM"
         if recompute_cyaw_for_thrust_sep:
             active_cols["CYaw"] = "CYaw_aero_BEM"
-
+    elif ct_corr_type=="EXP":
+        active_cols["CFt"] = "CFt_thrust_EXP"
+        if recompute_cd_for_thrust_sep:
+            active_cols["CD"] = "CD_aero_EXP"
+        if recompute_cl_for_thrust_sep:
+            active_cols["CL"] = "CL_aero_EXP"
+        if recompute_cyaw_for_thrust_sep:
+            active_cols["CYaw"] = "CYaw_aero_EXP"
+    
     # ------------------------------------------------------------
     # Optional model-off correction
     # ------------------------------------------------------------

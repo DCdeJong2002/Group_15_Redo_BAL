@@ -52,12 +52,10 @@ Correction sequence tail-off (recommended order)
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Sequence, Tuple, Set
+from typing import Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-import re
-
 
 pd.set_option('future.no_silent_downcasting', True)
 
@@ -189,39 +187,6 @@ class BaseCorrector:
         if missing:
             prefix = f"{context}: " if context else ""
             raise ValueError(f"{prefix}missing required columns: {missing}")
-        
-    @staticmethod
-    def _ct_interp_with_extrap(
-        J_query: float,
-        J_arr: np.ndarray,
-        CT_arr: np.ndarray,
-    ) -> float:
-        """
-        Linear interpolation inside [J_arr[0], J_arr[-1]]; linear extrapolation
-        outside, using the slope of the two nearest endpoint points.
-    
-        Parameters
-        ----------
-        J_query : float
-            Advance ratio value to evaluate.
-        J_arr : np.ndarray
-            Sorted (ascending) digitised J values for one velocity curve.
-        CT_arr : np.ndarray
-            CT values corresponding to J_arr.
-    
-        Returns
-        -------
-        float
-            Interpolated or linearly extrapolated CT value.
-        """
-        if J_query <= J_arr[0]:
-            slope = (CT_arr[1] - CT_arr[0]) / (J_arr[1] - J_arr[0])
-            return float(CT_arr[0] + slope * (J_query - J_arr[0]))
-        elif J_query >= J_arr[-1]:
-            slope = (CT_arr[-1] - CT_arr[-2]) / (J_arr[-1] - J_arr[-2])
-            return float(CT_arr[-1] + slope * (J_query - J_arr[-1]))
-        else:
-            return float(np.interp(J_query, J_arr, CT_arr))
 
     def set_save_directory(self, directory: str | Path) -> None:
         """
@@ -1202,6 +1167,121 @@ class BaseCorrector:
     # ============================================================
     # Shared: BEM thrust computation
     # ============================================================
+    def compute_ct_thrust_from_bem(
+        self,
+        df: pd.DataFrame,
+        j_col: str = "J",
+        v_col: str = "V",
+        rho_col: str = "rho",
+        q_col: str = "q",
+        D: float = None,
+        S_wing: float = None,
+        S_prop: float = None,
+        n_props: int = None,
+        output_cft_col: str = "CFt_thrust_BEM",
+        output_tcstar_col: str = "Tc_star_BEM",
+        output_ct_prop_col: str = "CT_props_total",
+    ) -> pd.DataFrame:
+        """
+        Compute the propeller thrust force coefficient from the BEM polynomial
+        (Appendix B, AE4115 Lab Manual).
+
+        Formulae
+        --------
+        BEM polynomial (per propeller) as a function of advance ratio J:
+
+            CT_bem(J) = -0.0051*J^4 + 0.0959*J^3 - 0.5888*J^2 + 1.0065*J - 0.1353
+
+        Total propeller thrust coefficient:
+
+            CT_props_total = n_props * CT_bem
+
+        Propeller rotational speed derived from the advance ratio:
+
+            n = V / (J * D)     [rev/s]
+
+        Thrust of a single propeller:
+
+            T1 = CT_bem * rho * n^2 * D^4
+
+        Total thrust for N propellers:
+
+            T_total = N_props * T1
+
+        Thrust force coefficient referenced to wing area:
+
+            CFt = T_total / (q * S)
+
+        Thrust loading coefficient referenced to propeller disc area:
+
+            Tc_star = T_total / (q * S_prop)
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input dataframe (not mutated; a copy is returned).
+        j_col : str
+            Column name of the advance ratio J.
+        v_col : str
+            Column name of the freestream velocity V [m/s].
+        rho_col : str
+            Column name of the air density rho [kg/m^3].
+        q_col : str
+            Column name of the dynamic pressure q [Pa].
+        D : float, optional
+            Propeller diameter [m]. Defaults to PROP_DIAMETER.
+        S_wing : float, optional
+            Wing reference area [m^2]. Defaults to WING_AREA.
+        S_prop : float, optional
+            Single propeller disc area [m^2]. Defaults to PROP_AREA.
+        n_props : int, optional
+            Number of propellers. Defaults to N_PROPS.
+        output_cft_col : str
+            Column name for the output CFt_thrust_BEM.
+        output_tcstar_col : str
+            Column name for the output Tc_star_BEM.
+
+        Returns
+        -------
+        pd.DataFrame
+            Copy of df with CFt_thrust_BEM and Tc_star_BEM columns added.
+        """
+        df = df.copy()
+
+        D       = D       if D       is not None else self.PROP_DIAMETER
+        S_wing  = S_wing  if S_wing  is not None else self.WING_AREA
+        S_prop  = S_prop  if S_prop  is not None else self.PROP_AREA
+        n_props = n_props if n_props is not None else self.N_PROPS
+
+        self.require_columns(df, [j_col, v_col, rho_col, q_col], context="compute_ct_thrust_from_bem")
+
+        J   = pd.to_numeric(df[j_col],   errors="coerce")
+        V   = pd.to_numeric(df[v_col],   errors="coerce")
+        rho = pd.to_numeric(df[rho_col], errors="coerce")
+        q   = pd.to_numeric(df[q_col],   errors="coerce")
+
+        CT_bem = (
+            -0.0051 * J**4
+            + 0.0959 * J**3
+            - 0.5888 * J**2
+            + 1.0065 * J
+            - 0.1353
+        )
+
+        CT_props_total = n_props * CT_bem
+        n_rps   = V / (J.replace(0, np.nan) * D)
+        T_one   = CT_bem * rho * n_rps**2 * D**4
+        T_total = n_props * T_one
+
+        df[output_ct_prop_col] = CT_props_total
+        df[output_cft_col]   = T_total / (q * S_wing)
+        df[output_tcstar_col] = T_total / (q * S_prop)
+
+        return df
+
+    # ============================================================
+    # Shared: BEM thrust separation
+    # ============================================================
     def compute_thrust_separation_BEM(
         self,
         ct_col_on: str = "CT",
@@ -1216,53 +1296,40 @@ class BaseCorrector:
         recompute_cyaw: bool = True,
     ) -> pd.DataFrame:
         """
-        Compute propeller thrust from the BEM polynomial and separate it from
-        the measured axial body-frame force coefficient CT, yielding
-        aerodynamic-only lift, drag, and side-force coefficients.
-    
-        All output columns carry the suffix _BEM. Call compute_thrust_separation_exp
-        afterwards to produce the equivalent _EXP columns for comparison.
-    
+        Separate the propeller thrust contribution from the measured axial
+        body-frame force coefficient CT, yielding aerodynamic-only lift,
+        drag, and side-force coefficients.
+
         Formulae
         --------
-        BEM polynomial (per propeller):
-    
-            CT_bem(J) = -0.0051*J^4 + 0.0959*J^3 - 0.5888*J^2 + 1.0065*J - 0.1353
-    
-        Propeller rotational speed:
-    
-            n = V / (J * D)     [rev/s]
-    
-        Thrust of a single propeller:
-    
-            T1 = CT_bem * rho * n^2 * D^4
-    
-        Total thrust:
-    
-            T_total = n_props * T1
-    
-        Thrust force coefficient referenced to wing area:
-    
-            CFt_thrust_BEM = T_total / (q * S_wing)
-    
-        Thrust loading coefficient:
-    
-            Tc_star_BEM = T_total / (q * S_prop)
-    
-        Aerodynamic axial force:
-    
-            CFt_aero_BEM = CT_measured + CFt_thrust_BEM
-    
-        Wind-axis transformation (alpha = AoA [rad], beta = AoS [rad]):
-    
-            CD_aero = (CN*sin(alpha) + CFt_aero*cos(alpha)) * cos(beta)
-                    + CS*sin(beta)
-    
-            CL_aero = CN*cos(alpha) - CFt_aero*sin(alpha)
-    
-            CYaw    = -(CN*sin(alpha) + CFt_aero*cos(alpha)) * sin(beta)
-                    + CS*cos(beta)
-    
+        The measured axial coefficient contains both aerodynamic drag and
+        propeller thrust (acting in opposite directions):
+
+            CT_measured = CD_aero - CFt_thrust
+
+        Rearranging for the aerodynamic axial force:
+
+            CFt_aero = CT_measured + CFt_thrust_BEM
+
+        Wind-axis transformation from body-frame force coefficients
+        (CN = normal, CS = side, CFt_aero = axial) to stability-axis
+        aerodynamic coefficients, where alpha = AoA [rad] and
+        beta = AoS [rad]:
+
+        Aerodynamic drag:
+
+            CD = (CN*sin(alpha) + CFt_aero*cos(alpha)) * cos(beta)
+                 + CS*sin(beta)
+
+        Aerodynamic lift:
+
+            CL = CN*cos(alpha) - CFt_aero*sin(alpha)
+
+        Aerodynamic yaw force:
+
+            CYaw = -(CN*sin(alpha) + CFt_aero*cos(alpha)) * sin(beta)
+                   + CS*cos(beta)
+
         Parameters
         ----------
         ct_col_on : str
@@ -1285,338 +1352,71 @@ class BaseCorrector:
             If True, compute and store CL_aero_BEM.
         recompute_cyaw : bool
             If True, compute and store CYaw_aero_BEM.
-    
+
         Returns
         -------
         pd.DataFrame
             self.df with the following new columns:
-    
+
             Always added:
-            - CT_props_total_BEM    n_props * CT_bem per row
-            - CFt_thrust_BEM        propeller thrust force coefficient
-            - Tc_star_BEM           thrust loading coefficient T/(q * S_prop)
-            - CFt_aero_BEM          aerodynamic axial force coefficient
-    
+            - CFt_thrust_BEM    propeller thrust force coefficient
+            - Tc_star_BEM       thrust loading coefficient T/(q * S_prop)
+            - CFt_aero_BEM      aerodynamic axial force coefficient
+
             Conditional (controlled by recompute_* flags):
             - CD_aero_BEM
             - CL_aero_BEM
             - CYaw_aero_BEM
         """
         df = self.df.copy()
-    
+
         D       = D       if D       is not None else self.PROP_DIAMETER
         S_wing  = S_wing  if S_wing  is not None else self.WING_AREA
         S_prop  = S_prop  if S_prop  is not None else self.PROP_AREA
         n_props = n_props if n_props is not None else self.N_PROPS
-    
+
         self.require_columns(
             df,
             [ct_col_on, aoa_col_on, aos_col_on, "J", "V", "rho", "q", "CN", "CY", "CT"],
             context="compute_thrust_separation_BEM",
         )
-    
-        # ------------------------------------------------------------------
-        # BEM polynomial CT and thrust conversion
-        # ------------------------------------------------------------------
-        J   = pd.to_numeric(df["J"],   errors="coerce")
-        V   = pd.to_numeric(df["V"],   errors="coerce")
-        rho = pd.to_numeric(df["rho"], errors="coerce")
-        q   = pd.to_numeric(df["q"],   errors="coerce")
-    
-        CT_bem = (
-            -0.0051 * J**4
-            + 0.0959 * J**3
-            - 0.5888 * J**2
-            + 1.0065 * J
-            - 0.1353
+
+        df = self.compute_ct_thrust_from_bem(
+            df=df, j_col="J", v_col="V", rho_col="rho", q_col="q",
+            D=D, S_wing=S_wing, S_prop=S_prop, n_props=n_props,
+            output_cft_col="CFt_thrust_BEM", output_tcstar_col="Tc_star_BEM",
         )
-    
-        n_rps   = V / (J.replace(0, np.nan) * D)
-        T_one   = CT_bem * rho * n_rps**2 * D**4
-        T_total = n_props * T_one
-    
-        df["CT_props_total_BEM"] = n_props * CT_bem
-        df["CFt_thrust_BEM"]     = T_total / (q * S_wing)
-        df["Tc_star_BEM"]        = T_total / (q * S_prop)
-    
-        # ------------------------------------------------------------------
-        # Thrust separation and wind-axis transformation
-        # ------------------------------------------------------------------
-        alpha    = np.deg2rad(pd.to_numeric(df[aoa_col_on], errors="coerce"))
-        beta     = np.deg2rad(pd.to_numeric(df[aos_col_on], errors="coerce"))
-        ct_on    = pd.to_numeric(df[ct_col_on],        errors="coerce")
-        cft_bem  = pd.to_numeric(df["CFt_thrust_BEM"], errors="coerce")
-    
+
+        alpha = np.deg2rad(pd.to_numeric(df[aoa_col_on], errors="coerce"))
+        beta  = np.deg2rad(pd.to_numeric(df[aos_col_on], errors="coerce"))
+
+        ct_on   = pd.to_numeric(df[ct_col_on],        errors="coerce")
+        cft_bem = pd.to_numeric(df["CFt_thrust_BEM"], errors="coerce")
+
+        # CT_measured = aero_drag - thrust  ->  CFt_aero = CT_measured + thrust
         df["CFt_aero_BEM"] = ct_on + cft_bem
-    
+
         CFn      = pd.to_numeric(df["CN"], errors="coerce")
         CFs      = pd.to_numeric(df["CY"], errors="coerce")
         CFt_aero = df["CFt_aero_BEM"]
-    
+
         if recompute_cd:
             df["CD_aero_BEM"] = (
                 (CFn * np.sin(alpha) + CFt_aero * np.cos(alpha)) * np.cos(beta)
                 + CFs * np.sin(beta)
             )
+
         if recompute_cl:
             df["CL_aero_BEM"] = CFn * np.cos(alpha) - CFt_aero * np.sin(alpha)
+
         if recompute_cyaw:
             df["CYaw_aero_BEM"] = (
                 -(CFn * np.sin(alpha) + CFt_aero * np.cos(alpha)) * np.sin(beta)
                 + CFs * np.cos(beta)
             )
-    
+
         self.df = df
         return self.df
-
-
-    def compute_thrust_separation_EXP(
-        self,
-        ct_col_on: str = "CT",
-        aoa_col_on: str = "AoA",
-        aos_col_on: str = "AoS",
-        S_wing: float = None,
-        S_prop: float = None,
-        D: float = None,
-        n_props: int = None,
-        recompute_cd: bool = True,
-        recompute_cl: bool = True,
-        recompute_cyaw: bool = True,
-        exp_ct_path: str | Path = "Ct_V_exp_data.csv",
-        extrap_velocities: frozenset[float] = frozenset({20., 40.}),
-        extrap_j_min: float = 1.6,
-        extrap_j_max: float = 2.8,
-    ) -> pd.DataFrame:
-        """
-        Compute propeller thrust by interpolating experimental CT-J curves from
-        WebPlotDigitizer and separate it from the measured axial body-frame force
-        coefficient CT, yielding aerodynamic-only lift, drag, and side-force
-        coefficients.
-    
-        All output columns carry the suffix _EXP. Call compute_thrust_separation_BEM
-        first to produce the equivalent _BEM columns; both sets then sit
-        side-by-side in self.df for direct comparison.
-    
-        CT lookup procedure (per row)
-        ------------------------------
-        1. Parse exp_ct_path CSV into one (J, CT) curve per freestream velocity.
-        The velocity is read from the series header, e.g. "Ct_V20" -> 20 m/s.
-        2. Find the two velocity curves bracketing the row's V (or the nearest
-        curve if V is outside the available range).
-        3. Evaluate CT on each bracketing curve at the row's J:
-            - linear interpolation if J is within the digitised range.
-            - linear extrapolation from the two nearest endpoint points if J
-                is outside the range AND the curve velocity is in
-                extrap_velocities AND J is within [extrap_j_min, extrap_j_max].
-            - flat clamp (np.interp default) in all other out-of-range cases.
-        4. Linearly interpolate the two CT values in V to the row's exact V.
-    
-        Thrust conversion (same as BEM path):
-    
-            n     = V / (J * D)
-            T1    = CT_exp * rho * n^2 * D^4
-            T     = n_props * T1
-            CFt   = T / (q * S_wing)
-            Tc*   = T / (q * S_prop)
-    
-        Thrust separation and wind-axis transformation:
-    
-            CFt_aero = CT_measured + CFt_thrust_EXP
-    
-            CD_aero = (CN*sin(alpha) + CFt_aero*cos(alpha)) * cos(beta)
-                    + CS*sin(beta)
-    
-            CL_aero = CN*cos(alpha) - CFt_aero*sin(alpha)
-    
-            CYaw    = -(CN*sin(alpha) + CFt_aero*cos(alpha)) * sin(beta)
-                    + CS*cos(beta)
-    
-        Parameters
-        ----------
-        ct_col_on : str
-            Column name of the measured axial body-frame force coefficient.
-        aoa_col_on : str
-            Column name of the angle of attack [degrees].
-        aos_col_on : str
-            Column name of the sideslip angle [degrees].
-        S_wing : float, optional
-            Wing reference area [m^2]. Defaults to WING_AREA.
-        S_prop : float, optional
-            Single propeller disc area [m^2]. Defaults to PROP_AREA.
-        D : float, optional
-            Propeller diameter [m]. Defaults to PROP_DIAMETER.
-        n_props : int, optional
-            Number of propellers. Defaults to N_PROPS.
-        recompute_cd : bool
-            If True, compute and store CD_aero_EXP.
-        recompute_cl : bool
-            If True, compute and store CL_aero_EXP.
-        recompute_cyaw : bool
-            If True, compute and store CYaw_aero_EXP.
-        exp_ct_path : str or Path
-            Path to the WebPlotDigitizer CSV file.
-            Default: "Ct_V_exp_data.csv"
-        extrap_velocities : frozenset of float
-            Freestream velocities [m/s] for which linear J-extrapolation beyond
-            the digitised range is permitted. Rows at other velocities are clamped
-            flat at the curve endpoints.
-            Default: frozenset({20., 40.})
-        extrap_j_min : float
-            Lower J bound of the extrapolation window. Default: 1.6.
-        extrap_j_max : float
-            Upper J bound of the extrapolation window. Default: 2.8.
-    
-        Returns
-        -------
-        pd.DataFrame
-            self.df with the following new columns added alongside any existing
-            _BEM columns:
-    
-            Always added:
-            - CT_props_total_EXP    total propeller thrust coefficient
-            - CFt_thrust_EXP        propeller thrust force coefficient
-            - Tc_star_EXP           thrust loading coefficient T/(q * S_prop)
-            - CFt_aero_EXP          aerodynamic axial force coefficient
-    
-            Conditional (controlled by recompute_* flags):
-            - CD_aero_EXP
-            - CL_aero_EXP
-            - CYaw_aero_EXP
-    
-        Raises
-        ------
-        ValueError
-            If no valid velocity curves are found in the CSV, or if required
-            columns are missing from self.df.
-        """
-        df = self.df.copy()
-    
-        D       = D       if D       is not None else self.PROP_DIAMETER
-        S_wing  = S_wing  if S_wing  is not None else self.WING_AREA
-        S_prop  = S_prop  if S_prop  is not None else self.PROP_AREA
-        n_props = n_props if n_props is not None else self.N_PROPS
-    
-        self.require_columns(
-            df,
-            [ct_col_on, aoa_col_on, aos_col_on, "J", "V", "rho", "q", "CN", "CY", "CT"],
-            context="compute_thrust_separation_exp",
-        )
-    
-        # ------------------------------------------------------------------
-        # Parse the WebPlotDigitizer CSV into {V_value: (J_arr, CT_arr)}
-        # ------------------------------------------------------------------
-        raw          = pd.read_csv(exp_ct_path, header=None)
-        series_names = raw.iloc[0].tolist()
-        curves: dict[float, tuple[np.ndarray, np.ndarray]] = {}
-    
-        col_idx = 0
-        while col_idx < len(series_names):
-            name = str(series_names[col_idx]).strip()
-            if name and name.lower() != "nan":
-                match = re.search(r"(\d+(?:\.\d+)?)$", name)
-                if match:
-                    v_key   = float(match.group(1))
-                    j_vals  = pd.to_numeric(
-                        raw.iloc[2:, col_idx], errors="coerce"
-                    ).dropna().to_numpy()
-                    ct_vals = pd.to_numeric(
-                        raw.iloc[2:, col_idx + 1], errors="coerce"
-                    ).iloc[: len(j_vals)].to_numpy()
-                    order         = np.argsort(j_vals)
-                    curves[v_key] = (j_vals[order], ct_vals[order])
-            col_idx += 2
-    
-        if not curves:
-            raise ValueError(
-                f"No valid velocity curves found in {exp_ct_path}. "
-                "Check that series headers follow the pattern 'Ct_V<number>'."
-            )
-    
-        v_keys = np.array(sorted(curves.keys()))
-    
-        # ------------------------------------------------------------------
-        # Helper: evaluate CT on one curve, with optional extrapolation
-        # ------------------------------------------------------------------
-        def ct_at_v(vk: float, J_i: float) -> float:
-            j_arr, ct_arr = curves[vk]
-            allow_extrap  = (
-                vk in extrap_velocities
-                and extrap_j_min <= J_i <= extrap_j_max
-            )
-            if allow_extrap:
-                return self._ct_interp_with_extrap(J_i, j_arr, ct_arr)
-            else:
-                return float(np.interp(J_i, j_arr, ct_arr))
-    
-        # ------------------------------------------------------------------
-        # Row-wise CT lookup with bracketing interpolation in V
-        # ------------------------------------------------------------------
-        J_series   = pd.to_numeric(df["J"],   errors="coerce").to_numpy()
-        V_series   = pd.to_numeric(df["V"],   errors="coerce").to_numpy()
-        rho_series = pd.to_numeric(df["rho"], errors="coerce").to_numpy()
-        q_series   = pd.to_numeric(df["q"],   errors="coerce").to_numpy()
-    
-        CT_exp = np.full(len(df), np.nan)
-    
-        for i, (J_i, V_i) in enumerate(zip(J_series, V_series)):
-            if np.isnan(J_i) or np.isnan(V_i):
-                continue
-    
-            idx_hi = int(np.searchsorted(v_keys, V_i))
-            idx_lo = max(idx_hi - 1, 0)
-            idx_hi = min(idx_hi, len(v_keys) - 1)
-    
-            if idx_lo == idx_hi:
-                CT_exp[i] = ct_at_v(v_keys[idx_lo], J_i)
-            else:
-                v_lo, v_hi = v_keys[idx_lo], v_keys[idx_hi]
-                ct_lo      = ct_at_v(v_lo, J_i)
-                ct_hi      = ct_at_v(v_hi, J_i)
-                frac       = (V_i - v_lo) / (v_hi - v_lo)
-                CT_exp[i]  = ct_lo + frac * (ct_hi - ct_lo)
-    
-        # ------------------------------------------------------------------
-        # Convert CT -> thrust -> force coefficients
-        # ------------------------------------------------------------------
-        J_safe  = np.where(J_series == 0, np.nan, J_series)
-        n_rps   = V_series / (J_safe * D)
-        T_one   = CT_exp * rho_series * n_rps**2 * D**4
-        T_total = n_props * T_one
-    
-        df["CT_props_total_EXP"] = n_props * CT_exp
-        df["CFt_thrust_EXP"]     = T_total / (q_series * S_wing)
-        df["Tc_star_EXP"]        = T_total / (q_series * S_prop)
-    
-        # ------------------------------------------------------------------
-        # Thrust separation and wind-axis transformation
-        # ------------------------------------------------------------------
-        alpha    = np.deg2rad(pd.to_numeric(df[aoa_col_on], errors="coerce"))
-        beta     = np.deg2rad(pd.to_numeric(df[aos_col_on], errors="coerce"))
-        ct_on    = pd.to_numeric(df[ct_col_on],        errors="coerce")
-        cft_exp  = pd.to_numeric(df["CFt_thrust_EXP"], errors="coerce")
-    
-        df["CFt_aero_EXP"] = ct_on + cft_exp
-    
-        CFn      = pd.to_numeric(df["CN"], errors="coerce")
-        CFs      = pd.to_numeric(df["CY"], errors="coerce")
-        CFt_aero = df["CFt_aero_EXP"]
-    
-        if recompute_cd:
-            df["CD_aero_EXP"] = (
-                (CFn * np.sin(alpha) + CFt_aero * np.cos(alpha)) * np.cos(beta)
-                + CFs * np.sin(beta)
-            )
-        if recompute_cl:
-            df["CL_aero_EXP"] = CFn * np.cos(alpha) - CFt_aero * np.sin(alpha)
-        if recompute_cyaw:
-            df["CYaw_aero_EXP"] = (
-                -(CFn * np.sin(alpha) + CFt_aero * np.cos(alpha)) * np.sin(beta)
-                + CFs * np.cos(beta)
-            )
-    
-        self.df = df
-        return self.df
-
 
     # ============================================================
     # Shared: rename final force/moment columns

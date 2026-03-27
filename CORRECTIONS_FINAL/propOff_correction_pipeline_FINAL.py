@@ -1,7 +1,7 @@
 from pathlib import Path
 import pandas as pd
 
-from correction_classes_FINAL import ModelOffCorrector, PropOffData
+from correction_classes_FINAL_V import ModelOffCorrector, PropOffData
 from TAILOFF_correction_pipeline_FINAL import run_tailoff_workflow
 
 

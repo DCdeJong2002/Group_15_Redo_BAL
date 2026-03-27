@@ -1,7 +1,7 @@
 from pathlib import Path
 import pandas as pd
 
-from correction_classes_FINAL import ModelOffCorrector, TailOffData
+from correction_classes_FINAL_V import ModelOffCorrector, TailOffData
 
 
 def run_tailoff_workflow(save_outputs=True):

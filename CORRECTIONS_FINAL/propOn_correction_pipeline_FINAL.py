@@ -1,10 +1,9 @@
 from pathlib import Path
 import pandas as pd
 
-from correction_classes_FINAL import ModelOffCorrector, PropOnData
+from correction_classes_FINAL_V import PropOnData, ModelOffCorrector
 from TAILOFF_correction_pipeline_FINAL import run_tailoff_workflow
 from propOff_correction_pipeline_FINAL import run_propoff_workflow
-
 
 
 def run_propon_workflow(
@@ -95,15 +94,16 @@ def run_propon_workflow(
         outputs["thrust_separation_BEM"] = current_df.copy()
 
         current_df = propon.compute_thrust_separation_EXP(
-                recompute_cd=recompute_cd_for_thrust_sep,
-                recompute_cl=recompute_cl_for_thrust_sep,
-                recompute_cyaw=recompute_cyaw_for_thrust_sep,
+            recompute_cd=recompute_cd_for_thrust_sep,
+            recompute_cl=recompute_cl_for_thrust_sep,
+            recompute_cyaw=recompute_cyaw_for_thrust_sep,
+            exp_ct_path=BASE_DIR / "INPUT_BALANCE_DATA" / "Ct_V_exp_data.csv",
         )
-        
+    
         outputs["thrust_separation_EXP"] = current_df.copy()
 
-
-    if ct_corr_type=="BEM":
+    #Update column names to use after this
+    if recompute_thrust_separation and ct_corr_type=="BEM":
         active_cols["CFt"] = "CFt_thrust_BEM"
         if recompute_cd_for_thrust_sep:
             active_cols["CD"] = "CD_aero_BEM"
@@ -111,7 +111,7 @@ def run_propon_workflow(
             active_cols["CL"] = "CL_aero_BEM"
         if recompute_cyaw_for_thrust_sep:
             active_cols["CYaw"] = "CYaw_aero_BEM"
-    elif ct_corr_type=="EXP":
+    elif recompute_thrust_separation and ct_corr_type=="EXP":
         active_cols["CFt"] = "CFt_thrust_EXP"
         if recompute_cd_for_thrust_sep:
             active_cols["CD"] = "CD_aero_EXP"
@@ -119,7 +119,18 @@ def run_propon_workflow(
             active_cols["CL"] = "CL_aero_EXP"
         if recompute_cyaw_for_thrust_sep:
             active_cols["CYaw"] = "CYaw_aero_EXP"
+    elif recompute_thrust_separation:
+        raise ValueError("recompute_thrust_separation was set to True but no resulting data column were selected")
     
+    # ------------------------------------------------------------
+    # After initializing propoff compute the delta_CT
+    # ------------------------------------------------------------
+    propoff_raw_df = pd.read_csv(BASE_DIR / "INPUT_BALANCE_DATA" / "propOff.csv")
+
+    current_df = propon.compute_delta_CT_from_propoff(
+        df_propoff=propoff_raw_df,          
+    )
+
     # ------------------------------------------------------------
     # Optional model-off correction
     # ------------------------------------------------------------

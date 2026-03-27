@@ -346,7 +346,7 @@ if __name__ == "__main__":
         save_final_output=True,
         verbose_flag=True,
         recompute_thrust_separation=True,
-        ct_corr_type="EXP",
+        ct_corr_type="BEM",
         recompute_cd_for_thrust_sep=True,
         recompute_cl_for_thrust_sep=True,
         recompute_cyaw_for_thrust_sep=True,

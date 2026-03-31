@@ -1342,9 +1342,9 @@ class BaseCorrector:
     
         n_rps   = V / (J.replace(0, np.nan) * D)
         T_one   = CT_bem * rho * n_rps**2 * D**4
-        T_total = n_props * T_one
+        T_total = T_one #*n_props
     
-        df["CT_props_total_BEM"] = n_props * CT_bem
+        df["CT_props_total_BEM"] = CT_bem #*n_props 
         df["CFt_thrust_BEM"]     = T_total / (q * S_wing)
         df["Tc_star_BEM"]        = T_total / (q * S_prop)
     
@@ -1356,7 +1356,10 @@ class BaseCorrector:
         ct_on    = pd.to_numeric(df[ct_col_on],        errors="coerce")
         cft_bem  = pd.to_numeric(df["CFt_thrust_BEM"], errors="coerce")
     
-        df["CFt_aero_BEM"] = ct_on + cft_bem
+        if False:
+            df["CFt_aero_BEM"] = ct_on + cft_bem
+        else:
+            df["CFt_aero_BEM"] = ct_on - cft_bem
     
         CFn      = pd.to_numeric(df["CN"], errors="coerce")
         CFs      = pd.to_numeric(df["CY"], errors="coerce")
@@ -1593,9 +1596,9 @@ class BaseCorrector:
         J_safe  = np.where(J_series == 0, np.nan, J_series)
         n_rps   = V_series / (J_safe * D)
         T_one   = CT_exp * rho_series * n_rps**2 * D**4
-        T_total = n_props * T_one
+        T_total = T_one #*n_props
     
-        df["CT_props_total_EXP"] = n_props * CT_exp
+        df["CT_props_total_EXP"] = CT_exp #*n_props 
         df["CFt_thrust_EXP"]     = T_total / (q_series * S_wing)
         df["Tc_star_EXP"]        = T_total / (q_series * S_prop)
     
@@ -1606,8 +1609,12 @@ class BaseCorrector:
         beta     = np.deg2rad(pd.to_numeric(df[aos_col_on], errors="coerce"))
         ct_on    = pd.to_numeric(df[ct_col_on],        errors="coerce")
         cft_exp  = pd.to_numeric(df["CFt_thrust_EXP"], errors="coerce")
-    
-        df["CFt_aero_EXP"] = ct_on + cft_exp
+
+        print("BINGBONG================================")
+        if False:
+            df["CFt_aero_EXP"] = ct_on + cft_exp
+        else:
+            df["CFt_aero_EXP"] = ct_on - cft_exp    
     
         CFn      = pd.to_numeric(df["CN"], errors="coerce")
         CFs      = pd.to_numeric(df["CY"], errors="coerce")
@@ -3541,7 +3548,7 @@ class PropOnData(BaseCorrector):
 
         df_valid["CT_props_delta"] = (
             -df_valid["delta_CT"] * q * S_wing
-            / (rho * n_rps**2 * D**4 * n_props)
+            / (rho * n_rps**2 * D**4)
         )
 
         # ------------------------------------------------------------------

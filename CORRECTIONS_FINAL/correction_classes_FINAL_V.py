@@ -133,8 +133,8 @@ class BaseCorrector:
 
     DCMPITCH_DALPHA:          float = -0.15676   # per rad
 
-    E_SOLID_BLOCKAGE:         float = 0.007229438
-    E_SOLID_BLOCKAGE_TAILOFF: float = 0.006406642
+    E_SOLID_BLOCKAGE:         float = 0.007219591
+    E_SOLID_BLOCKAGE_TAILOFF: float = 0.006399352
 
     # ============================================================
     def __init__(self, save_dir: str | Path | None = None) -> None:

@@ -85,22 +85,21 @@ def run_propon_workflow(
     # ------------------------------------------------------------
     # Compute BEM thrust separation BEFORE model-off correction
     # ------------------------------------------------------------
-    if recompute_thrust_separation:
-        current_df = propon.compute_thrust_separation_BEM(
-            recompute_cd=recompute_cd_for_thrust_sep,
-            recompute_cl=recompute_cl_for_thrust_sep,
-            recompute_cyaw=recompute_cyaw_for_thrust_sep,
-        )
-        outputs["thrust_separation_BEM"] = current_df.copy()
+    current_df = propon.compute_thrust_separation_BEM(
+        recompute_cd=recompute_cd_for_thrust_sep,
+        recompute_cl=recompute_cl_for_thrust_sep,
+        recompute_cyaw=recompute_cyaw_for_thrust_sep,
+    )
+    outputs["thrust_separation_BEM"] = current_df.copy()
 
-        current_df = propon.compute_thrust_separation_EXP(
-            recompute_cd=recompute_cd_for_thrust_sep,
-            recompute_cl=recompute_cl_for_thrust_sep,
-            recompute_cyaw=recompute_cyaw_for_thrust_sep,
-            exp_ct_path=BASE_DIR / "INPUT_BALANCE_DATA" / "Ct_V_exp_data.csv",
-        )
-    
-        outputs["thrust_separation_EXP"] = current_df.copy()
+    current_df = propon.compute_thrust_separation_EXP(
+        recompute_cd=recompute_cd_for_thrust_sep,
+        recompute_cl=recompute_cl_for_thrust_sep,
+        recompute_cyaw=recompute_cyaw_for_thrust_sep,
+        exp_ct_path=BASE_DIR / "INPUT_BALANCE_DATA" / "Ct_V_exp_data.csv",
+    )
+
+    outputs["thrust_separation_EXP"] = current_df.copy()
 
     #Update column names to use after this
     if recompute_thrust_separation and ct_corr_type=="BEM":

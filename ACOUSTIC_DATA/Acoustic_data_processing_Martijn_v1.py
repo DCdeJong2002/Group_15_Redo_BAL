@@ -99,30 +99,48 @@ def main():
 
     # --- PLOT 1: J Sweep - ABSOLUTE FREQUENCY (Constant AoA = 2.5°) ---
     # This plot visualizes how the noise severity changes as the propeller loading (J) varies.
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(9, 5))
     j_data = df[df['aoa'] == 2.5].sort_values('j_adv')
     
+    j_colors = {1.6: 'blue', 2.0: 'red', 2.8: 'green'}
+
     for i, (_, row) in enumerate(j_data.iterrows()):
-        # Select the color from the cycle (blue, red, green)
-        color = color_cycle[i % 3]
+        # Identify the J-value and get the corresponding color
+        current_j = round(row['j_adv'], 1)
+        color = j_colors.get(current_j, 'black') # Defaults to black if J is unexpected
         
-        # Calculate BPF for labeling
+        # Calculate fundamental BPF
         bpf = row['rps'] * num_blades
         
-        plt.plot(row['freqs'], row['spsl'], color=color, 
-                 label=f"J = {row['j_adv']:.2f} (BPF ≈ {bpf:.0f}Hz)")
+        # 1. Plot the SPSL spectral line
+        plt.plot(row['freqs'], row['spsl'], color=color, linewidth=1.2,
+                 label=f"J = {row['j_adv']:.1f}")
+        
+        # 2. Plot the first four harmonics (n=1, 2, 3, 4)
+        for n in range(1, 5):
+            harmonic_freq = n * bpf
+            
+            # Label only the first BPF of each J value to keep the legend readable
+            line_label = f"BPF (J={current_j}, 1st BPF ≈ {bpf:.0f}Hz)" if i < len(j_colors) and n == 1 else None
+            
+            plt.axvline(x=harmonic_freq, 
+                        color=color, 
+                        linestyle='--', 
+                        alpha=0.3, 
+                        linewidth=0.8,
+                        label=line_label)
     
-    plt.title("J-Sweep: Acoustic Severity vs. Propeller Loading (Constant AoA = 2.5°)")
+    '''plt.title("J-Sweep: Acoustic Severity vs. Propeller Loading (Constant AoA = 2.5°)")'''
     plt.xlabel("Frequency [Hz]")
     plt.ylabel("SPSL [dB/Hz]")
-    plt.xlim([0, 5000]) # Capture first ~5 harmonics at max RPS
+    plt.xlim([0, 4000]) # Capture first ~5 harmonics at max RPS
     plt.ylim([35, 85])
-    plt.legend(title="Advance Ratio", fontsize='small')
+    plt.legend(title="Advance ratio $J$", fontsize='small')
     plt.grid(True, alpha=0.3)
 
     # --- PLOT 2: AoA Sweep - NORMALIZED FREQUENCY (Constant J ≈ 1.6) ---
     # This plot isolates the "Propulsion-Airframe Integration Effect" by keeping the loading (J) constant.
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(9, 5))
     # Filter for data points very close to the target J=1.6
     aoa_data = df[abs(df['j_adv'] - 1.6) <= 0.05].sort_values('aoa')
     
@@ -133,16 +151,14 @@ def main():
         # Normalize the frequency axis by the specific BPF of this run
         bpf = row['rps'] * num_blades
         plt.plot(row['freqs'] / bpf, row['spsl'], color=color, 
-                 label=f"AoA = {row['aoa']:.1f}°")
+                 label=f"$\\alpha$ = {row['aoa']:.1f}°")
     
-    plt.title("AoA Sweep: Propeller-Airframe Integration Effect (Constant J ≈ 1.6)")
-    plt.xlabel("Normalized Frequency [$f / f_b$]")
+    '''plt.title("AoA Sweep: Propeller-Airframe Integration Effect (Constant J ≈ 1.6)")'''
+    plt.xlabel("Normalized frequency [$f / BPF$]")
     plt.ylabel("SPSL [dB/Hz]")
-    # Vertical reference line for the fundamental Blade Passage Frequency
-    plt.axvline(1, color='red', linestyle='--', alpha=0.5, label='BPF')
     plt.xlim([0, 6]) # View fundamental through 6th harmonic
     plt.ylim([35, 85])
-    plt.legend(title="Angle of Attack", fontsize='small')
+    plt.legend(title="Angle of Attack $\\alpha$", fontsize='small')
     plt.grid(True, alpha=0.3)
 
     plt.show()

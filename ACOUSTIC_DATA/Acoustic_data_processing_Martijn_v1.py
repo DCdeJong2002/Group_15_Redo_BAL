@@ -86,7 +86,10 @@ def load_mic_data(folder_path, target_files, fs, D=0.2032):
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     mic_folder = os.path.join(script_dir, 'Mic')
-    # Sampling frequency, diameter (from manual), and number of blades
+
+    output_folder = os.path.join(script_dir, 'Generated plots')
+    os.makedirs(output_folder, exist_ok=True)
+
     fs, D, num_blades = 51200.0, 0.2032, 6
     target_files = ['DPN18.txt', 'DPN19.txt', 'DPN26.txt', 'DPN27.txt']
     
@@ -95,14 +98,14 @@ def main():
     if df.empty: return
 
     # Define the custom bright color cycle requested by the user
-    color_cycle = ['b', 'r', 'g'] # Bright Blue, Bright Red, Bright Green
+    color_cycle = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red']
 
     # --- PLOT 1: J Sweep - ABSOLUTE FREQUENCY (Constant AoA = 2.5°) ---
     # This plot visualizes how the noise severity changes as the propeller loading (J) varies.
     plt.figure(figsize=(9, 5))
     j_data = df[df['aoa'] == 2.5].sort_values('j_adv')
     
-    j_colors = {1.6: 'blue', 2.0: 'red', 2.8: 'green'}
+    j_colors = {1.6: 'tab:blue', 2.0: 'tab:orange', 2.8: 'tab:green'}
 
     for i, (_, row) in enumerate(j_data.iterrows()):
         # Identify the J-value and get the corresponding color
@@ -126,7 +129,7 @@ def main():
             plt.axvline(x=harmonic_freq, 
                         color=color, 
                         linestyle='--', 
-                        alpha=0.3, 
+                        alpha=0.5, 
                         linewidth=0.8,
                         label=line_label)
     
@@ -135,8 +138,10 @@ def main():
     plt.ylabel("SPSL [dB/Hz]")
     plt.xlim([0, 4000]) # Capture first ~5 harmonics at max RPS
     plt.ylim([35, 85])
-    plt.legend(title="Advance ratio $J$", fontsize='small')
-    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize='small')
+    plt.grid(True, alpha=0.8)
+
+    plt.savefig(os.path.join(output_folder, 'J_Sweep_Acoustic.png'), dpi=400, bbox_inches='tight')
 
     # --- PLOT 2: AoA Sweep - NORMALIZED FREQUENCY (Constant J ≈ 1.6) ---
     # This plot isolates the "Propulsion-Airframe Integration Effect" by keeping the loading (J) constant.
@@ -145,7 +150,7 @@ def main():
     aoa_data = df[abs(df['j_adv'] - 1.6) <= 0.05].sort_values('aoa')
     
     for i, (_, row) in enumerate(aoa_data.iterrows()):
-        # Select the color from the cycle (blue, red, green)
+        # Select the color from the cycle (blue, orange, green)
         color = color_cycle[i % 3]
         
         # Normalize the frequency axis by the specific BPF of this run
@@ -158,8 +163,10 @@ def main():
     plt.ylabel("SPSL [dB/Hz]")
     plt.xlim([0, 6]) # View fundamental through 6th harmonic
     plt.ylim([35, 85])
-    plt.legend(title="Angle of Attack $\\alpha$", fontsize='small')
-    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize='small')
+    plt.grid(True, alpha=0.8)
+
+    plt.savefig(os.path.join(output_folder, 'AoA_Sweep_Acoustic.png'), dpi=400, bbox_inches='tight')
 
     plt.show()
 

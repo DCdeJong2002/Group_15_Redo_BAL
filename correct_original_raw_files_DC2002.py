@@ -533,13 +533,13 @@ def BAL_forces(
         CMp = CM[:, 1] - XmRefB[2] * CF[:, 0] + XmRefB[0] * CF[:, 2]
         CMy = CM[:, 2] + XmRefB[1] * CF[:, 0] - XmRefB[0] * CF[:, 1]
 
-        """
-        CMr_tmp = CMr.copy()
-        CMr = CMr * cosA - CMy * sinA
-        CMy = CMy * cosA + CMr_tmp * sinA
-        """
-        CMr = CMr * cosA - CMy * sinA
-        CMy = CMy * cosA + CMr * sinA
+        if True:
+            CMr_tmp = CMr.copy()
+            CMr = CMr * cosA - CMy * sinA
+            CMy = CMy * cosA + CMr_tmp * sinA
+        else:
+            CMr = CMr * cosA - CMy * sinA
+            CMy = CMy * cosA + CMr * sinA
         
         if modelPos.lower() == "normal":
             CFt = +CF[:, 0] * cosA + CF[:, 2] * sinA
@@ -808,8 +808,8 @@ def main():
     idxB = SUP_getIdx()
 
     # Relative path inside your git repo
-    diskPath = Path(__file__).resolve().parent / "TAILOFF" 
-    output_dir = Path(__file__).resolve().parent / "TAILOFF" / "processed_data"
+    diskPath = Path(__file__).resolve().parent / "RAW_TEST_DATA" 
+    output_dir = Path(__file__).resolve().parent / "RAW_TEST_DATA" / "processed_data"
 
     # Raw wind-on measurement files
     fn_BAL = [

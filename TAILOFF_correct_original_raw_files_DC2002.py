@@ -533,13 +533,13 @@ def BAL_forces(
         CMp = CM[:, 1] - XmRefB[2] * CF[:, 0] + XmRefB[0] * CF[:, 2]
         CMy = CM[:, 2] + XmRefB[1] * CF[:, 0] - XmRefB[0] * CF[:, 1]
 
-        """
-        CMr_tmp = CMr.copy()
-        CMr = CMr * cosA - CMy * sinA
-        CMy = CMy * cosA + CMr_tmp * sinA
-        """
-        CMr = CMr * cosA - CMy * sinA
-        CMy = CMy * cosA + CMr * sinA
+        if True:
+            CMr_tmp = CMr.copy()
+            CMr = CMr * cosA - CMy * sinA
+            CMy = CMy * cosA + CMr_tmp * sinA
+        else:
+            CMr = CMr * cosA - CMy * sinA
+            CMy = CMy * cosA + CMr * sinA
         
         if modelPos.lower() == "normal":
             CFt = +CF[:, 0] * cosA + CF[:, 2] * sinA
@@ -776,18 +776,12 @@ def save_outputs(BAL: Dict[str, Any], combined_df: pd.DataFrame, output_dir: Uni
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save one CSV per configuration
-    for cfg in BAL["config"]:
-        df_cfg = combined_df.loc[combined_df["config"] == cfg].copy()
-        csv_path = output_dir / f"{cfg}.csv"
-        df_cfg.to_csv(csv_path, index=False)
-
     # Save combined CSV
-    combined_csv_path = output_dir / "all_rudder_cases_combined.csv"
+    combined_csv_path = output_dir / "all_TAILOFF_cases_combined.csv"
     combined_df.to_csv(combined_csv_path, index=False)
 
     # Save one Excel file with one sheet per config + combined sheet
-    excel_path = output_dir / "all_rudder_cases.xlsx"
+    excel_path = output_dir / "all_TAILOFF_cases.xlsx"
     with pd.ExcelWriter(excel_path, engine="xlsxwriter") as writer:
         for cfg in BAL["config"]:
             df_cfg = combined_df.loc[combined_df["config"] == cfg].copy()
@@ -797,7 +791,6 @@ def save_outputs(BAL: Dict[str, Any], combined_df: pd.DataFrame, output_dir: Uni
 
     print(f"Saved combined CSV   : {combined_csv_path.resolve()}")
     print(f"Saved combined Excel : {excel_path.resolve()}")
-    print(f"Saved per-case CSVs  : {output_dir.resolve()}")
 
 
 # ============================================================
@@ -808,8 +801,8 @@ def main():
     idxB = SUP_getIdx()
 
     # Relative path inside your git repo
-    diskPath = Path(__file__).resolve().parent / "TAILOFF" 
-    output_dir = Path(__file__).resolve().parent / "TAILOFF" / "processed_data"
+    diskPath = Path(__file__).resolve().parent / "RAW_TAILOFF_DATA" 
+    output_dir = Path(__file__).resolve().parent / "RAW_TAILOFF_DATA" / "processed_data"
 
     # Raw files
     fn_BAL = [

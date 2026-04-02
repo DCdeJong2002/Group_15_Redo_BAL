@@ -1348,9 +1348,9 @@ class BaseCorrector:
         T_one   = CT_bem * rho * n_rps**2 * D**4
         T_total = T_one * n_props
     
-        df["CT_props_total_BEM"] = CT_bem * n_props 
+        df["CT_props_total_BEM"] = CT_bem 
         df["CFt_thrust_BEM"]     = T_total / (q * S_wing)
-        df["Tc_star_BEM"]        = T_total / (q * S_prop)
+        df["Tc_star_BEM"]        = T_total / (q * S_prop * n_props)
     
         # ------------------------------------------------------------------
         # Thrust separation and wind-axis transformation
@@ -1605,9 +1605,9 @@ class BaseCorrector:
         T_one   = CT_exp * rho_series * n_rps**2 * D**4
         T_total = T_one * n_props
     
-        df["CT_props_total_EXP"] = CT_exp * n_props 
+        df["CT_props_total_EXP"] = CT_exp  
         df["CFt_thrust_EXP"]     = T_total / (q_series * S_wing)
-        df["Tc_star_EXP"]        = T_total / (q_series * S_prop)
+        df["Tc_star_EXP"]        = T_total / (q_series * S_prop * n_props)
     
         # ------------------------------------------------------------------
         # Thrust separation and wind-axis transformation
@@ -3011,6 +3011,7 @@ class PropOnData(BaseCorrector):
         tc_col: str = "Tc_star_BEM",
         D_prop: Optional[float] = None,
         S_prop: Optional[float] = None,
+        n_props: Optional[int] = None,
         tunnel_area: Optional[float] = None,
         output_col: str = "ess",
         save_csv: bool = False,
@@ -3070,6 +3071,7 @@ class PropOnData(BaseCorrector):
         tunnel_area = tunnel_area if tunnel_area is not None else self.TUNNEL_AREA
         D_prop      = D_prop      if D_prop      is not None else self.PROP_DIAMETER
         S_prop      = S_prop      if S_prop      is not None else (0.25 * np.pi * (D_prop ** 2))
+        n_props     = n_props     if n_props     is not None else self.N_PROPS
 
         self.require_columns(df, [tc_col], context="compute slipstream blockage factor")
 
@@ -3078,7 +3080,7 @@ class PropOnData(BaseCorrector):
         if (1.0 + 2.0 * tc < 0).any():
             raise ValueError("Encountered Tc* values for which (1 + 2 Tc*) < 0, making ess invalid.")
 
-        df[output_col] = -(tc / (2.0 * np.sqrt(1.0 + 2.0 * tc))) * (S_prop / tunnel_area)
+        df[output_col] = -n_props * ((tc / (2.0 * np.sqrt(1.0 + 2.0 * tc))) * (S_prop / tunnel_area))
 
         self.df = df
 

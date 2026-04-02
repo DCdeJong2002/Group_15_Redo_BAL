@@ -759,7 +759,11 @@ class BaseCorrector:
         # --------------------------------------------------------
         # Compute tail corrections
         # --------------------------------------------------------
-        df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * tau2_lt
+        if True:
+            df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * tau2_lt
+        else:
+            df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * (1+tau2_lt)
+
         df["delta_alpha_tail_deg"] = df["delta_alpha_tail_rad"] * 57.3
 
         if dcmpitch_dalpha_unit == "per_deg":

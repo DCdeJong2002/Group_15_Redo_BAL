@@ -131,7 +131,7 @@ class BaseCorrector:
         TAU2_WING:            float = 0.045     #old
         TAU2_TAIL:            float = 0.8       #old
 
-    DCMPITCH_DALPHA:          float = -0.15676   # per rad
+    DCMPITCH_DALPHA:          float = -0.15676   # per deg
 
     E_SOLID_BLOCKAGE:         float = 0.007219591
     E_SOLID_BLOCKAGE_TAILOFF: float = 0.006399352
@@ -700,7 +700,7 @@ class BaseCorrector:
         """
 
         # Resolve defaults from class constants if not explicitly passed
-        delta           = delta           if delta           is not None else self.DELTA_TAIL
+        delta           = delta           if delta           is not None else self.DELTA_WING
         geom_factor     = geom_factor     if geom_factor     is not None else self.GEOM_FACTOR
         tau2_lt         = tau2_lt         if tau2_lt         is not None else self.TAU2_TAIL
         dcmpitch_dalpha = dcmpitch_dalpha if dcmpitch_dalpha is not None else self.DCMPITCH_DALPHA
@@ -759,9 +759,8 @@ class BaseCorrector:
         # --------------------------------------------------------
         # Compute tail corrections
         # --------------------------------------------------------
-        print("Applying tail correction with parameters:")
         df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * tau2_lt
-        df["delta_alpha_tail_deg"] = np.degrees(df["delta_alpha_tail_rad"])
+        df["delta_alpha_tail_deg"] = df["delta_alpha_tail_rad"] * 57.3
 
         if dcmpitch_dalpha_unit == "per_deg":
             df["delta_CMpitch_tail"] = dcmpitch_dalpha * df["delta_alpha_tail_deg"]

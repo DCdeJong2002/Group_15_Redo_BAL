@@ -176,7 +176,6 @@ def run_propoff_workflow(
             filename="propOff_tail_corrected.csv"
         )
         outputs["tail_corrected"] = current_df.copy()
-        active_cols["AoA"]     = f"{active_cols['AoA']}_tail_corr"
         active_cols["CMpitch"] = f"{active_cols['CMpitch']}_tail_corr"
 
     current_df = propoff.create_final_output_df(

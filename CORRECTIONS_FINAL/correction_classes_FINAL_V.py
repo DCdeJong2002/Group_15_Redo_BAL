@@ -759,7 +759,7 @@ class BaseCorrector:
         # --------------------------------------------------------
         # Compute tail corrections
         # --------------------------------------------------------
-        df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * tau2_lt
+        df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * (1 + tau2_lt)
         df["delta_alpha_tail_deg"] = np.degrees(df["delta_alpha_tail_rad"])
 
         if dcmpitch_dalpha_unit == "per_deg":
@@ -767,7 +767,7 @@ class BaseCorrector:
         else:
             df["delta_CMpitch_tail"] = dcmpitch_dalpha * df["delta_alpha_tail_rad"]
 
-        df[f"{aoa_source_col}_tail_corr"] = df[aoa_source_col] + df["delta_alpha_tail_deg"]
+        df[f"TAILONLY_{aoa_source_col}_tail_corr"] = df[aoa_source_col] + df["delta_alpha_tail_deg"]
         # minus sign: tail downwash reduces effective AoA -> reduces CMpitch (more negative)
         df[f"{cmpitch_source_col}_tail_corr"] = df[cmpitch_source_col] - df["delta_CMpitch_tail"]
         df["tail_correction_data_found"]      = df["CLw_tailoff"].notna()
@@ -1178,7 +1178,7 @@ class BaseCorrector:
 
         df["e_total_blockage"] = e_total
 
-        velocity_factor    = 1.0 / (1.0 + df["e_total_blockage"])
+        velocity_factor    = (1.0 + df["e_total_blockage"])
         coefficient_factor = 1.0 / (1.0 + df["e_total_blockage"]) ** 2
 
         for col in velocity_cols:

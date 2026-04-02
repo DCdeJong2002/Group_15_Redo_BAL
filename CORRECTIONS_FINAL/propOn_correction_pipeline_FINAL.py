@@ -309,7 +309,6 @@ def run_propon_workflow(
             filename="propOn_tail_corrected.csv"
         )
         outputs["tail_correction"] = current_df.copy()
-        active_cols["AoA"]     = f"{active_cols['AoA']}_tail_corr"
         active_cols["CMpitch"] = f"{active_cols['CMpitch']}_tail_corr"
 
 

@@ -11,7 +11,7 @@ def run_propon_workflow(
     save_final_output: bool = True,
     verbose_flag: bool = True,
     recompute_thrust_separation: bool = True,
-    ct_corr_type: str = "EXP", #choose from "EXP" or "BEM"
+    ct_corr_type: str = "BEM", #choose from "EXP" or "BEM"
     recompute_cd_for_thrust_sep: bool = True,
     recompute_cl_for_thrust_sep: bool = True,
     recompute_cyaw_for_thrust_sep: bool = True,
@@ -305,6 +305,7 @@ def run_propon_workflow(
             tailoff=tailoff,
             aoa_source_col=active_cols["AoA"],
             cmpitch_source_col=active_cols["CMpitch"],
+            dcmpitch_dalpha_unit="per_deg",
             save_csv=save_outputs,
             filename="propOn_tail_corrected.csv"
         )

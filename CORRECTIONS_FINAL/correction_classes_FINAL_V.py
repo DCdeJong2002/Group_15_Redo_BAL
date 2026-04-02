@@ -604,7 +604,7 @@ class BaseCorrector:
         geom_factor: float = None,
         tau2_lt: float = None,
         dcmpitch_dalpha: float = None,
-        dcmpitch_dalpha_unit: str = "per_rad",
+        dcmpitch_dalpha_unit: str = "per_deg",
         aoa_source_col: Optional[str] = None,
         cmpitch_source_col: str = "CMpitch_blockage_corr",
         dataset_label: str = "dataset",
@@ -759,7 +759,8 @@ class BaseCorrector:
         # --------------------------------------------------------
         # Compute tail corrections
         # --------------------------------------------------------
-        df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * (1 + tau2_lt)
+        print("Applying tail correction with parameters:")
+        df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * tau2_lt
         df["delta_alpha_tail_deg"] = np.degrees(df["delta_alpha_tail_rad"])
 
         if dcmpitch_dalpha_unit == "per_deg":

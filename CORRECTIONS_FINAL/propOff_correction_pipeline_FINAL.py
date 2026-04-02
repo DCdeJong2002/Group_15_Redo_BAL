@@ -172,6 +172,7 @@ def run_propoff_workflow(
             tailoff=tailoff,
             aoa_source_col=active_cols["AoA"],
             cmpitch_source_col=active_cols["CMpitch"],
+            dcmpitch_dalpha_unit="per_deg",
             save_csv=save_outputs,
             filename="propOff_tail_corrected.csv"
         )

@@ -1613,7 +1613,6 @@ class BaseCorrector:
         ct_on    = pd.to_numeric(df[ct_col_on],        errors="coerce")
         cft_exp  = pd.to_numeric(df["CFt_thrust_EXP"], errors="coerce")
 
-        print("BINGBONG================================")
         mode = 1
         if mode == 1:
             df["CFt_aero_EXP"] = ct_on + cft_exp
@@ -3392,7 +3391,9 @@ class PropOnData(BaseCorrector):
 
             - CT_propoff_inv       body-frame CT recovered from prop-off CL/CD/CYaw
             - delta_CT             CT_propon - CT_propoff_inv  (prop net axial force)
-            - CT_props_delta       standard propeller CT from delta_CT
+            - delta_T              propeller thrust per unit dynamic pressure and wing area
+            - CT_one_prop_delta    propeller thrust coefficient per propeller
+            - CT_both_prop_delta   combined thrust coefficient for both propellers
             - propoff_match_found  bool flag: True where a prop-off match existed
         """
         S_wing  = S_wing  if S_wing  is not None else self.WING_AREA
@@ -3400,10 +3401,6 @@ class PropOnData(BaseCorrector):
         D       = D       if D       is not None else self.PROP_DIAMETER
         n_props = n_props if n_props is not None else self.N_PROPS
 
-        df_on = self.df.copy()
-
-        # line 3390 — change from:
-        df_on = self.df.copy()
         # to:
         df_on = self.df.copy().reset_index(drop=True)
 
@@ -3411,7 +3408,15 @@ class PropOnData(BaseCorrector):
         # Drop output columns if they already exist from a previous call
         # to prevent pandas _x/_y suffix collision on merge
         # ------------------------------------------------------------------
-        _out_cols = ["CT_propoff_inv", "delta_CT", "CT_props_delta", "propoff_match_found"]
+        _out_cols = [
+            "CT_propoff_inv",
+            "delta_CT",
+            "delta_T",
+            "CT_one_prop_delta",
+            "CT_both_prop_delta",
+            "CT_props_delta",
+            "propoff_match_found",
+        ]
         df_on = df_on.drop(columns=[c for c in _out_cols if c in df_on.columns])
 
         # ------------------------------------------------------------------
@@ -3552,10 +3557,14 @@ class PropOnData(BaseCorrector):
         J_safe = J.replace(0, np.nan)
         n_rps  = V / (J_safe * D)
 
-        df_valid["CT_props_delta"] = (
+        df_valid["delta_T"] = df_valid["delta_CT"] * q * S_wing 
+
+        df_valid["CT_one_prop_delta"] = (
             -df_valid["delta_CT"] * q * S_wing
-            / (rho * n_rps**2 * D**4)
+            / (rho * n_rps**2 * D**4 * n_props)
         )
+
+        df_valid["CT_both_prop_delta"] = df_valid["CT_one_prop_delta"] * n_props
 
         # ------------------------------------------------------------------
         # Initialise output columns on df_on (AFTER merge, no collision risk)
@@ -3563,10 +3572,12 @@ class PropOnData(BaseCorrector):
         # ------------------------------------------------------------------
         df_on["CT_propoff_inv"]      = np.nan
         df_on["delta_CT"]            = np.nan
-        df_on["CT_props_delta"]      = np.nan
+        df_on["delta_T"]             = np.nan
+        df_on["CT_one_prop_delta"]   = np.nan
+        df_on["CT_both_prop_delta"]  = np.nan
         df_on["propoff_match_found"] = False
 
-        for col in ["CT_propoff_inv", "delta_CT", "CT_props_delta", "propoff_match_found"]:
+        for col in ["CT_propoff_inv", "delta_CT", "delta_T", "CT_one_prop_delta", "CT_both_prop_delta", "propoff_match_found"]:
             df_on.loc[valid_mask, col] = df_valid[col].values
 
         self.df = df_on

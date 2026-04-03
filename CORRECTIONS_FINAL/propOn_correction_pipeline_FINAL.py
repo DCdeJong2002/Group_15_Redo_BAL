@@ -360,7 +360,7 @@ if __name__ == "__main__":
     )
     
 
-    if False:
+    if True:
         from generate_comparison_html_extended import load_and_build, generate_html
         from pathlib import Path
 

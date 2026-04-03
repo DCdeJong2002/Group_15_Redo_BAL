@@ -759,7 +759,7 @@ class BaseCorrector:
         # --------------------------------------------------------
         # Compute tail corrections
         # --------------------------------------------------------
-        if True:
+        if False:
             df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * tau2_lt
         else:
             df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * (1+tau2_lt)

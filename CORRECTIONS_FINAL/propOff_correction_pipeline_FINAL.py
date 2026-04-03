@@ -170,7 +170,7 @@ def run_propoff_workflow(
     if apply_tail_correction:
         current_df = propoff.apply_tail_correction(
             tailoff=tailoff,
-            aoa_source_col=active_cols["AoA"],
+            aoa_source_col="AoA",
             cmpitch_source_col=active_cols["CMpitch"],
             dcmpitch_dalpha_unit="per_deg",
             save_csv=save_outputs,

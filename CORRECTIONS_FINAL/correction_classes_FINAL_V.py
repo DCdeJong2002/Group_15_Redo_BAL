@@ -757,7 +757,7 @@ class BaseCorrector:
         df = self._merge_clw_tailoff(df, tailoff, context="tail correction")
 
         # --------------------------------------------------------
-        # Compute tail corrections
+        # Compute tail corrections second method was chosen
         # --------------------------------------------------------
         if False:
             df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * tau2_lt

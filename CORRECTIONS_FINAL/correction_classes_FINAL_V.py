@@ -118,18 +118,10 @@ class BaseCorrector:
     N_PROPS:                  int   = 2
 
     #whether or not to use the new tau and delta values
-    use_new_tau_delta_values = True
-
-    if use_new_tau_delta_values:
-        DELTA_WING:           float = 0.103691
-        DELTA_TAIL:           float = 0.103691
-        TAU2_WING:            float = 0.069616
-        TAU2_TAIL:            float = 0.749271
-    else:
-        DELTA_WING:           float = 0.1065    #old
-        DELTA_TAIL:           float = 0.1085    #old
-        TAU2_WING:            float = 0.045     #old
-        TAU2_TAIL:            float = 0.8       #old
+    DELTA_WING:           float = 0.103691
+    DELTA_TAIL:           float = 0.103691
+    TAU2_WING:            float = 0.069616
+    TAU2_TAIL:            float = 0.749271
 
     DCMPITCH_DALPHA:          float = -0.15676   # per deg
 
@@ -1403,8 +1395,8 @@ class BaseCorrector:
         recompute_cyaw: bool = True,
         exp_ct_path: str | Path = None,
         extrap_velocities: frozenset[float] = frozenset({20., 40.}),
-        extrap_j_min: float = 1.6,
-        extrap_j_max: float = 2.8,
+        extrap_j_min: float = 1.55,
+        extrap_j_max: float = 2.85,
     ) -> pd.DataFrame:
         """
         Compute propeller thrust by interpolating experimental CT-J curves from
@@ -1555,7 +1547,6 @@ class BaseCorrector:
             )
     
         v_keys = np.array(sorted(curves.keys()))
-    
         # ------------------------------------------------------------------
         # Helper: evaluate CT on one curve, with optional extrapolation
         # ------------------------------------------------------------------
@@ -1574,7 +1565,7 @@ class BaseCorrector:
         # Row-wise CT lookup with bracketing interpolation in V
         # ------------------------------------------------------------------
         J_series   = pd.to_numeric(df["J"],   errors="coerce").to_numpy()
-        V_series   = pd.to_numeric(df["V"],   errors="coerce").to_numpy()
+        V_series   = pd.to_numeric(df["V_round"],   errors="coerce").to_numpy()
         rho_series = pd.to_numeric(df["rho"], errors="coerce").to_numpy()
         q_series   = pd.to_numeric(df["q"],   errors="coerce").to_numpy()
     

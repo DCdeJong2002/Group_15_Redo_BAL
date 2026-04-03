@@ -341,11 +341,11 @@ def run_propon_workflow(
 
 if __name__ == "__main__":
     propon, df_final, outputs = run_propon_workflow(
-        save_outputs=True,
+        save_outputs=False,
         save_final_output=True,
         verbose_flag=True,
         recompute_thrust_separation=True,
-        ct_corr_type="BEM",
+        ct_corr_type="EXP",
         recompute_cd_for_thrust_sep=True,
         recompute_cl_for_thrust_sep=True,
         recompute_cyaw_for_thrust_sep=True,
@@ -360,7 +360,7 @@ if __name__ == "__main__":
     )
     
 
-    if True:
+    if False:
         from generate_comparison_html_extended import load_and_build, generate_html
         from pathlib import Path
 

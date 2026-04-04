@@ -1340,7 +1340,7 @@ class BaseCorrector:
         T_one   = CT_bem * rho * n_rps**2 * D**4
         T_total = T_one * n_props
     
-        df["CT_props_total_BEM"] = CT_bem 
+        df["CT_one_prop_BEM"]    = CT_bem 
         df["CFt_thrust_BEM"]     = T_total / (q * S_wing)
         df["Tc_star_BEM"]        = T_total / (q * S_prop * n_props)
     
@@ -1596,7 +1596,7 @@ class BaseCorrector:
         T_one   = CT_exp * rho_series * n_rps**2 * D**4
         T_total = T_one * n_props
     
-        df["CT_props_total_EXP"] = CT_exp  
+        df["CT_one_prop_EXP"] = CT_exp  
         df["CFt_thrust_EXP"]     = T_total / (q_series * S_wing)
         df["Tc_star_EXP"]        = T_total / (q_series * S_prop * n_props)
     

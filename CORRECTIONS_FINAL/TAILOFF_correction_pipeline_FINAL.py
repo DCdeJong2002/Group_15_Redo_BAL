@@ -9,7 +9,7 @@ def run_tailoff_workflow(save_outputs=True):
     BASE_DIR = Path(__file__).resolve().parent
 
     modeloff = ModelOffCorrector(
-        correction_csv=BASE_DIR / "INPUT_BALANCE_DATA" / "model_off_corrections_grid.csv",
+        correction_csv=BASE_DIR / "MODEL_OFF_DATA" / "model_off_corrections_grid.csv",
         save_dir=BASE_DIR / "results_TAILOFF_FINAL"
     )
 

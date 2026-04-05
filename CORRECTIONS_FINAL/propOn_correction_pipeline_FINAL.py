@@ -135,7 +135,7 @@ def run_propon_workflow(
     # ------------------------------------------------------------
     if apply_modeloff:
         modeloff = ModelOffCorrector(
-            correction_csv=BASE_DIR / "INPUT_BALANCE_DATA" / "model_off_corrections_grid.csv",
+            correction_csv=BASE_DIR / "MODEL_OFF_DATA" / "model_off_corrections_grid.csv",
             save_dir=BASE_DIR / save_directory
         )
 

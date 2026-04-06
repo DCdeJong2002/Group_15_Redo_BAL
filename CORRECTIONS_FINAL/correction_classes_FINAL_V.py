@@ -1083,7 +1083,7 @@ class BaseCorrector:
         esb_col: str = "esb",
         ewb_col: str = "ewb",
         ess_col: str = "ess",
-        velocity_cols: Sequence[str] = ("V",),
+        velocity_cols: Sequence[str] = ("V", "J"),
         coefficient_cols: Sequence[str] = ("CL", "CD", "CYaw", "CMroll", "CMpitch", "CMyaw"),
         suffix: str = "blockage_corr",
         cft_thrust_col: Optional[str] = "CFt_thrust_BEM",
@@ -1565,7 +1565,7 @@ class BaseCorrector:
         # Row-wise CT lookup with bracketing interpolation in V
         # ------------------------------------------------------------------
         J_series   = pd.to_numeric(df["J"],   errors="coerce").to_numpy()
-        V_series   = pd.to_numeric(df["V_round"],   errors="coerce").to_numpy()
+        V_series   = pd.to_numeric(df["V"],   errors="coerce").to_numpy()
         rho_series = pd.to_numeric(df["rho"], errors="coerce").to_numpy()
         q_series   = pd.to_numeric(df["q"],   errors="coerce").to_numpy()
     
@@ -3188,7 +3188,7 @@ class PropOnData(BaseCorrector):
         esb_col: str = "esb",
         ewb_col: str = "ewb",
         ess_col: str = "ess",
-        velocity_cols: Sequence[str] = ("V",),
+        velocity_cols: Sequence[str] = ("V", "J"),
         coefficient_cols: Sequence[str] = ("CL", "CD", "CYaw", "CMroll", "CMpitch", "CMyaw"),
         cft_thrust_col: str = "CFt_thrust_BEM",
         suffix: str = "blockage_corr",

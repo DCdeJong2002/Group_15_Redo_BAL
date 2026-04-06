@@ -5,6 +5,30 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from scipy import signal
 from nptdms import TdmsFile
+import seaborn as sns
+import matplotlib as mpl
+
+# ── Colour palette (match notebook) ───────────────────────────────────────────
+sns.set_palette("colorblind")
+COLORS = sns.color_palette("colorblind").as_hex()
+# ── Global font / style settings (match notebook) ─────────────────────────────
+mpl.rcParams.update({
+    "text.usetex": False,
+    "font.family": "serif",
+    "font.serif": ["CMU Serif", "Computer Modern Roman", "Latin Modern Roman", "DejaVu Serif"],
+    "mathtext.fontset": "cm",
+
+    "axes.labelsize": 10,
+    "legend.fontsize": 10,
+    "xtick.labelsize": 10,
+    "ytick.labelsize": 10,
+    "axes.titlesize": 12,
+
+    "savefig.bbox": "tight",
+    "savefig.pad_inches": 0.02,
+
+    "legend.frameon": True,
+})
 
 # ============================================================
 # 1. HELPER FUNCTIONS: PERFORMANCE & CONVECTION
@@ -154,6 +178,8 @@ def main():
     j_data = df[df['aoa'] == 2.5].sort_values('j')
     
     j_colors = {1.6: 'tab:blue', 2.0: 'tab:orange', 2.8: 'tab:green'}
+    # PLOT 1 — replace the j_colors dict
+    j_colors = {1.6: COLORS[0], 2.0: COLORS[1], 2.8: COLORS[2]}
 
     for i, (_, row) in enumerate(j_data.iterrows()):
         current_j = round(row['j'], 1)
@@ -181,7 +207,7 @@ def main():
     plt.ylim([35, 85])
     plt.legend(fontsize='small')
     plt.grid(True, alpha=0.8)
-    plt.savefig(os.path.join(output_folder, 'J_Sweep_Absolute_AbsFreq.png'), dpi=400, bbox_inches='tight')
+    plt.savefig(os.path.join(output_folder, 'J_Sweep_Absolute_AbsFreq.pdf'), dpi=300, bbox_inches='tight')
 
     # =========================================================================
     # --- PLOT 2: J-SWEEP (FULLY ND SCALED) ---
@@ -200,7 +226,7 @@ def main():
     plt.legend(fontsize='small')
     plt.grid(True, alpha=0.8)
 
-    plt.savefig(os.path.join(output_folder, 'J_Sweep_Thrust_BPF_Normalized.png'), dpi=400, bbox_inches='tight')
+    plt.savefig(os.path.join(output_folder, 'J_Sweep_Thrust_BPF_Normalized.pdf'), dpi=300, bbox_inches='tight')
 
     # =========================================================================
     # --- PLOT 3: ALPHA-SWEEP (FULLY ND SCALED) ---
@@ -219,7 +245,7 @@ def main():
     plt.legend(fontsize='small')
     plt.grid(True, alpha=0.8)
 
-    plt.savefig(os.path.join(output_folder, 'Alpha_Sweep_ThrustScaled.png'), dpi=400, bbox_inches='tight')
+    plt.savefig(os.path.join(output_folder, 'Alpha_Sweep_ThrustScaled.pdf'), dpi=300, bbox_inches='tight')
 
     plt.show()
 

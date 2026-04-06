@@ -11,7 +11,7 @@ def run_propon_workflow(
     save_final_output: bool = True,
     verbose_flag: bool = True,
     recompute_thrust_separation: bool = True,
-    ct_corr_type: str = "EXP", #choose from "EXP" or "BEM"
+    ct_corr_type: str = "BEM", #choose from "EXP" or "BEM"
     recompute_cd_for_thrust_sep: bool = True,
     recompute_cl_for_thrust_sep: bool = True,
     recompute_cyaw_for_thrust_sep: bool = True,
@@ -135,7 +135,7 @@ def run_propon_workflow(
     # ------------------------------------------------------------
     if apply_modeloff:
         modeloff = ModelOffCorrector(
-            correction_csv=BASE_DIR / "INPUT_BALANCE_DATA" / "model_off_corrections_grid.csv",
+            correction_csv=BASE_DIR / "MODEL_OFF_DATA" / "model_off_corrections_grid.csv",
             save_dir=BASE_DIR / save_directory
         )
 
@@ -303,8 +303,9 @@ def run_propon_workflow(
     if apply_tail_correction:
         current_df = propon.apply_tail_correction(
             tailoff=tailoff,
-            aoa_source_col=active_cols["AoA"],
+            aoa_source_col="AoA",
             cmpitch_source_col=active_cols["CMpitch"],
+            dcmpitch_dalpha_unit="per_deg",
             save_csv=save_outputs,
             filename="propOn_tail_corrected.csv"
         )
@@ -340,11 +341,11 @@ def run_propon_workflow(
 
 if __name__ == "__main__":
     propon, df_final, outputs = run_propon_workflow(
-        save_outputs=True,
+        save_outputs=False,
         save_final_output=True,
         verbose_flag=True,
         recompute_thrust_separation=True,
-        ct_corr_type="BEM",
+        ct_corr_type="EXP",
         recompute_cd_for_thrust_sep=True,
         recompute_cl_for_thrust_sep=True,
         recompute_cyaw_for_thrust_sep=True,

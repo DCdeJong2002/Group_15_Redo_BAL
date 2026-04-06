@@ -65,7 +65,7 @@ def run_propoff_workflow(
     # ------------------------------------------------------------
     if apply_modeloff:
         modeloff = ModelOffCorrector(
-            correction_csv=BASE_DIR / "INPUT_BALANCE_DATA" / "model_off_corrections_grid.csv",
+            correction_csv=BASE_DIR / "MODEL_OFF_DATA" / "model_off_corrections_grid.csv",
             save_dir=BASE_DIR / save_directory
         )
 
@@ -170,8 +170,9 @@ def run_propoff_workflow(
     if apply_tail_correction:
         current_df = propoff.apply_tail_correction(
             tailoff=tailoff,
-            aoa_source_col=active_cols["AoA"],
+            aoa_source_col="AoA",
             cmpitch_source_col=active_cols["CMpitch"],
+            dcmpitch_dalpha_unit="per_deg",
             save_csv=save_outputs,
             filename="propOff_tail_corrected.csv"
         )
@@ -202,7 +203,7 @@ def run_propoff_workflow(
 
 if __name__ == "__main__":
     propoff, df_final, outputs = run_propoff_workflow(
-        save_outputs=True,
+        save_outputs=False,
         save_final_output=True,
         verbose_flag=True,
         apply_modeloff=True,

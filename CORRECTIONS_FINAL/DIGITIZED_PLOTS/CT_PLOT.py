@@ -13,6 +13,7 @@ the prop-on dataset which only contains V=20 and V=40).
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
+from pathlib import Path
 
 # -- Experimental data (WebPlotDigitizer, Ct_V_exp_data.csv) ------------------
 exp_data = {
@@ -39,7 +40,7 @@ EXTRAP_VELOCITIES = {20, 40}
 J_EXTRAP_MIN = 1.6
 J_EXTRAP_MAX = 2.8
 
-
+_PLOT_DIR = Path(__file__).parent / "RES_PLOTS"
 def linear_extrap(J_query, J_arr, CT_arr):
     """
     Linear interpolation inside [J_arr[0], J_arr[-1]].
@@ -138,6 +139,7 @@ ax.grid(True, alpha=0.3)
 ax.axhline(0, color="k", lw=0.6, ls="--", alpha=0.4)
 
 plt.tight_layout()
-plt.savefig("CT_BEM_vs_exp.png", dpi=150)
+out = _PLOT_DIR / "CT_BEM_vs_exp.png"
+plt.savefig(out, dpi=150)
 plt.show()
-print("Saved CT_BEM_vs_exp.png")
+print(f"Saved {out.name}")

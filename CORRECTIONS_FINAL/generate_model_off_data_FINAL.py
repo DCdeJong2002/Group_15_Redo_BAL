@@ -13,16 +13,15 @@ except Exception:
 # ============================================================
 # Settings
 # ============================================================
+BASE_DIR = Path(__file__).resolve().parent
 
 # Absolute path you gave
-input_file = Path(
-    r"C:\Users\douwe\AE4115-23_EXPERIMENTAL SIMULATIONS\Group_15_Redo_BAL\CORRECTIONS_V2\MODEL_OFF_DATA\modelOffData.xlsx"
-)
+input_file = BASE_DIR / "MODEL_OFF_DATA" / "modelOffData.xlsx"
 
 # If you prefer repo-relative instead, comment the line above and use:
 # input_file = Path(__file__).resolve().parent / "MODEL_OFF_DATA" / "modelOffData.xlsx"
 
-output_dir = input_file.parent
+output_dir = BASE_DIR / "MODEL_OFF_DATA"
 csv_file = output_dir / "model_off_corrections_grid.csv"
 xlsx_file = output_dir / "model_off_corrections_grid.xlsx"
 

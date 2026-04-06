@@ -118,20 +118,12 @@ class BaseCorrector:
     N_PROPS:                  int   = 2
 
     #whether or not to use the new tau and delta values
-    use_new_tau_delta_values = True
+    DELTA_WING:           float = 0.103691
+    DELTA_TAIL:           float = 0.103691
+    TAU2_WING:            float = 0.069616
+    TAU2_TAIL:            float = 0.749271
 
-    if use_new_tau_delta_values:
-        DELTA_WING:           float = 0.103691
-        DELTA_TAIL:           float = 0.103691
-        TAU2_WING:            float = 0.069616
-        TAU2_TAIL:            float = 0.749271
-    else:
-        DELTA_WING:           float = 0.1065    #old
-        DELTA_TAIL:           float = 0.1085    #old
-        TAU2_WING:            float = 0.045     #old
-        TAU2_TAIL:            float = 0.8       #old
-
-    DCMPITCH_DALPHA:          float = -0.15676   # per rad
+    DCMPITCH_DALPHA:          float = -0.15676   # per deg
 
     E_SOLID_BLOCKAGE:         float = 0.007219591
     E_SOLID_BLOCKAGE_TAILOFF: float = 0.006399352
@@ -604,7 +596,7 @@ class BaseCorrector:
         geom_factor: float = None,
         tau2_lt: float = None,
         dcmpitch_dalpha: float = None,
-        dcmpitch_dalpha_unit: str = "per_rad",
+        dcmpitch_dalpha_unit: str = "per_deg",
         aoa_source_col: Optional[str] = None,
         cmpitch_source_col: str = "CMpitch_blockage_corr",
         dataset_label: str = "dataset",
@@ -700,7 +692,7 @@ class BaseCorrector:
         """
 
         # Resolve defaults from class constants if not explicitly passed
-        delta           = delta           if delta           is not None else self.DELTA_TAIL
+        delta           = delta           if delta           is not None else self.DELTA_WING
         geom_factor     = geom_factor     if geom_factor     is not None else self.GEOM_FACTOR
         tau2_lt         = tau2_lt         if tau2_lt         is not None else self.TAU2_TAIL
         dcmpitch_dalpha = dcmpitch_dalpha if dcmpitch_dalpha is not None else self.DCMPITCH_DALPHA
@@ -757,10 +749,14 @@ class BaseCorrector:
         df = self._merge_clw_tailoff(df, tailoff, context="tail correction")
 
         # --------------------------------------------------------
-        # Compute tail corrections
+        # Compute tail corrections second method was chosen
         # --------------------------------------------------------
-        df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * (1 + tau2_lt)
-        df["delta_alpha_tail_deg"] = np.degrees(df["delta_alpha_tail_rad"])
+        if False:
+            df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * tau2_lt
+        else:
+            df["delta_alpha_tail_rad"] = delta * geom_factor * df["CLw_tailoff"] * (1+tau2_lt)
+
+        df["delta_alpha_tail_deg"] = df["delta_alpha_tail_rad"] * 57.3
 
         if dcmpitch_dalpha_unit == "per_deg":
             df["delta_CMpitch_tail"] = dcmpitch_dalpha * df["delta_alpha_tail_deg"]
@@ -1344,9 +1340,9 @@ class BaseCorrector:
         T_one   = CT_bem * rho * n_rps**2 * D**4
         T_total = T_one * n_props
     
-        df["CT_props_total_BEM"] = CT_bem * n_props 
+        df["CT_one_prop_BEM"]    = CT_bem 
         df["CFt_thrust_BEM"]     = T_total / (q * S_wing)
-        df["Tc_star_BEM"]        = T_total / (q * S_prop)
+        df["Tc_star_BEM"]        = T_total / (q * S_prop * n_props)
     
         # ------------------------------------------------------------------
         # Thrust separation and wind-axis transformation
@@ -1399,8 +1395,8 @@ class BaseCorrector:
         recompute_cyaw: bool = True,
         exp_ct_path: str | Path = None,
         extrap_velocities: frozenset[float] = frozenset({20., 40.}),
-        extrap_j_min: float = 1.6,
-        extrap_j_max: float = 2.8,
+        extrap_j_min: float = 1.55,
+        extrap_j_max: float = 2.85,
     ) -> pd.DataFrame:
         """
         Compute propeller thrust by interpolating experimental CT-J curves from
@@ -1551,7 +1547,6 @@ class BaseCorrector:
             )
     
         v_keys = np.array(sorted(curves.keys()))
-    
         # ------------------------------------------------------------------
         # Helper: evaluate CT on one curve, with optional extrapolation
         # ------------------------------------------------------------------
@@ -1570,7 +1565,7 @@ class BaseCorrector:
         # Row-wise CT lookup with bracketing interpolation in V
         # ------------------------------------------------------------------
         J_series   = pd.to_numeric(df["J"],   errors="coerce").to_numpy()
-        V_series   = pd.to_numeric(df["V"],   errors="coerce").to_numpy()
+        V_series   = pd.to_numeric(df["V_round"],   errors="coerce").to_numpy()
         rho_series = pd.to_numeric(df["rho"], errors="coerce").to_numpy()
         q_series   = pd.to_numeric(df["q"],   errors="coerce").to_numpy()
     
@@ -1601,9 +1596,9 @@ class BaseCorrector:
         T_one   = CT_exp * rho_series * n_rps**2 * D**4
         T_total = T_one * n_props
     
-        df["CT_props_total_EXP"] = CT_exp * n_props 
+        df["CT_one_prop_EXP"] = CT_exp  
         df["CFt_thrust_EXP"]     = T_total / (q_series * S_wing)
-        df["Tc_star_EXP"]        = T_total / (q_series * S_prop)
+        df["Tc_star_EXP"]        = T_total / (q_series * S_prop * n_props)
     
         # ------------------------------------------------------------------
         # Thrust separation and wind-axis transformation
@@ -1613,7 +1608,6 @@ class BaseCorrector:
         ct_on    = pd.to_numeric(df[ct_col_on],        errors="coerce")
         cft_exp  = pd.to_numeric(df["CFt_thrust_EXP"], errors="coerce")
 
-        print("BINGBONG================================")
         mode = 1
         if mode == 1:
             df["CFt_aero_EXP"] = ct_on + cft_exp
@@ -3008,6 +3002,7 @@ class PropOnData(BaseCorrector):
         tc_col: str = "Tc_star_BEM",
         D_prop: Optional[float] = None,
         S_prop: Optional[float] = None,
+        n_props: Optional[int] = None,
         tunnel_area: Optional[float] = None,
         output_col: str = "ess",
         save_csv: bool = False,
@@ -3067,6 +3062,7 @@ class PropOnData(BaseCorrector):
         tunnel_area = tunnel_area if tunnel_area is not None else self.TUNNEL_AREA
         D_prop      = D_prop      if D_prop      is not None else self.PROP_DIAMETER
         S_prop      = S_prop      if S_prop      is not None else (0.25 * np.pi * (D_prop ** 2))
+        n_props     = n_props     if n_props     is not None else self.N_PROPS
 
         self.require_columns(df, [tc_col], context="compute slipstream blockage factor")
 
@@ -3075,7 +3071,7 @@ class PropOnData(BaseCorrector):
         if (1.0 + 2.0 * tc < 0).any():
             raise ValueError("Encountered Tc* values for which (1 + 2 Tc*) < 0, making ess invalid.")
 
-        df[output_col] = -(tc / (2.0 * np.sqrt(1.0 + 2.0 * tc))) * (S_prop / tunnel_area)
+        df[output_col] = -n_props * ((tc / (2.0 * np.sqrt(1.0 + 2.0 * tc))) * (S_prop / tunnel_area))
 
         self.df = df
 
@@ -3392,7 +3388,9 @@ class PropOnData(BaseCorrector):
 
             - CT_propoff_inv       body-frame CT recovered from prop-off CL/CD/CYaw
             - delta_CT             CT_propon - CT_propoff_inv  (prop net axial force)
-            - CT_props_delta       standard propeller CT from delta_CT
+            - delta_T              propeller thrust per unit dynamic pressure and wing area
+            - CT_one_prop_delta    propeller thrust coefficient per propeller
+            - CT_both_prop_delta   combined thrust coefficient for both propellers
             - propoff_match_found  bool flag: True where a prop-off match existed
         """
         S_wing  = S_wing  if S_wing  is not None else self.WING_AREA
@@ -3400,10 +3398,6 @@ class PropOnData(BaseCorrector):
         D       = D       if D       is not None else self.PROP_DIAMETER
         n_props = n_props if n_props is not None else self.N_PROPS
 
-        df_on = self.df.copy()
-
-        # line 3390 — change from:
-        df_on = self.df.copy()
         # to:
         df_on = self.df.copy().reset_index(drop=True)
 
@@ -3411,7 +3405,15 @@ class PropOnData(BaseCorrector):
         # Drop output columns if they already exist from a previous call
         # to prevent pandas _x/_y suffix collision on merge
         # ------------------------------------------------------------------
-        _out_cols = ["CT_propoff_inv", "delta_CT", "CT_props_delta", "propoff_match_found"]
+        _out_cols = [
+            "CT_propoff_inv",
+            "delta_CT",
+            "delta_T",
+            "CT_one_prop_delta",
+            "CT_both_prop_delta",
+            "CT_props_delta",
+            "propoff_match_found",
+        ]
         df_on = df_on.drop(columns=[c for c in _out_cols if c in df_on.columns])
 
         # ------------------------------------------------------------------
@@ -3552,10 +3554,14 @@ class PropOnData(BaseCorrector):
         J_safe = J.replace(0, np.nan)
         n_rps  = V / (J_safe * D)
 
-        df_valid["CT_props_delta"] = (
+        df_valid["delta_T"] = df_valid["delta_CT"] * q * S_wing 
+
+        df_valid["CT_one_prop_delta"] = (
             -df_valid["delta_CT"] * q * S_wing
-            / (rho * n_rps**2 * D**4)
+            / (rho * n_rps**2 * D**4 * n_props)
         )
+
+        df_valid["CT_both_prop_delta"] = df_valid["CT_one_prop_delta"] * n_props
 
         # ------------------------------------------------------------------
         # Initialise output columns on df_on (AFTER merge, no collision risk)
@@ -3563,10 +3569,12 @@ class PropOnData(BaseCorrector):
         # ------------------------------------------------------------------
         df_on["CT_propoff_inv"]      = np.nan
         df_on["delta_CT"]            = np.nan
-        df_on["CT_props_delta"]      = np.nan
+        df_on["delta_T"]             = np.nan
+        df_on["CT_one_prop_delta"]   = np.nan
+        df_on["CT_both_prop_delta"]  = np.nan
         df_on["propoff_match_found"] = False
 
-        for col in ["CT_propoff_inv", "delta_CT", "CT_props_delta", "propoff_match_found"]:
+        for col in ["CT_propoff_inv", "delta_CT", "delta_T", "CT_one_prop_delta", "CT_both_prop_delta", "propoff_match_found"]:
             df_on.loc[valid_mask, col] = df_valid[col].values
 
         self.df = df_on

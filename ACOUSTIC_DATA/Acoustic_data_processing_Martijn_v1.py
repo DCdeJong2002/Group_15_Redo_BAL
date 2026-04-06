@@ -1,4 +1,5 @@
 import os
+from matplotlib import ticker
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -116,7 +117,7 @@ def main():
         bpf = row['rps'] * num_blades
         
         # 1. Plot the SPSL spectral line
-        plt.plot(row['freqs'], row['spsl'], color=color, linewidth=1.2,
+        plt.plot(row['freqs'], row['spsl'], color=color,
                  label=f"J = {row['j_adv']:.1f}")
         
         # 2. Plot the first four harmonics (n=1, 2, 3, 4)
@@ -129,14 +130,14 @@ def main():
             plt.axvline(x=harmonic_freq, 
                         color=color, 
                         linestyle='--', 
-                        alpha=0.5, 
-                        linewidth=0.8,
+                        alpha=0.7, 
+                        linewidth=1,
                         label=line_label)
     
     '''plt.title("J-Sweep: Acoustic Severity vs. Propeller Loading (Constant AoA = 2.5°)")'''
     plt.xlabel("Frequency [Hz]")
     plt.ylabel("SPSL [dB/Hz]")
-    plt.xlim([0, 4000]) # Capture first ~5 harmonics at max RPS
+    plt.xlim([10, 3600]) # Capture first ~5 harmonics at max RPS
     plt.ylim([35, 85])
     plt.legend(fontsize='small')
     plt.grid(True, alpha=0.8)
@@ -161,7 +162,9 @@ def main():
     '''plt.title("AoA Sweep: Propeller-Airframe Integration Effect (Constant J ≈ 1.6)")'''
     plt.xlabel("Normalized frequency [$f / BPF$]")
     plt.ylabel("SPSL [dB/Hz]")
-    plt.xlim([0, 6]) # View fundamental through 6th harmonic
+    ax = plt.gca()
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+    plt.xlim([10/738, 4.05]) # View fundamental through 6th harmonic
     plt.ylim([35, 85])
     plt.legend(fontsize='small')
     plt.grid(True, alpha=0.8)

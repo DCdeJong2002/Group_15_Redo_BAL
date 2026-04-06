@@ -77,9 +77,9 @@ def get_convection_results(X_m, Y_m, Z_m, V_inf, c=343.0):
 # 2. SPECTRAL PROCESSING (DUAL REFERENCE & OASPL)
 # ============================================================
 
-def calculate_spsl(p_mic, fs, p_ref_nd, bpf, N=8192, f_min=11, f_max=18000):
+def calculate_spsl(p_mic, fs, p_ref_nd, bpf, N=8192):
     """
-    Calculates Absolute SPSL, Fully Non-Dimensional SPSL, and band-limited OASPL.
+    Calculates Absolute SPSL, Fully Non-Dimensional SPSL, and OASPL.
     """
     T_win, data = N / fs, p_mic - np.mean(p_mic)
     B = len(data) // N
@@ -101,13 +101,17 @@ def calculate_spsl(p_mic, fs, p_ref_nd, bpf, N=8192, f_min=11, f_max=18000):
     spsl_nd = 10 * np.log10((phi * bpf) / (p_ref_nd**2) + 1e-25) 
 
     df = fs / N 
-    valid_idx = (freqs >= f_min) & (freqs <= f_max)
+    
+    # OASPL Calculation over the whole frequency spectrum
+    p_rms_sq = np.sum(phi) * df
 
-    p_rms_sq = np.sum(phi[valid_idx]) * df
-
+    # 1. Absolute OASPL (20 uPa ref)
     oaspl_abs = 10 * np.log10((p_rms_sq / (20e-6)**2) + 1e-12)
     
-    return freqs, spsl_abs, spsl_nd, oaspl_abs
+    # 2. Non-Dimensional OASPL (T/D^2 ref)
+    oaspl_nd = 10 * np.log10((p_rms_sq / (p_ref_nd)**2) + 1e-25)
+    
+    return freqs, spsl_abs, spsl_nd, oaspl_abs, oaspl_nd
 
 # ============================================================
 # 3. MAIN EXECUTION
@@ -119,7 +123,8 @@ def main():
     fs, D, num_blades = 51200.0, 0.2032, 6
     rho = 1.225
     
-    target_files = ['DPN18.txt', 'DPN19.txt', 'DPN26.txt', 'DPN27.txt']
+    # ADDED DPN22.txt to the target files
+    target_files = ['DPN18.txt', 'DPN19.txt', 'DPN22.txt', 'DPN26.txt', 'DPN27.txt']
     script_dir = os.path.dirname(os.path.abspath(__file__))
     mic_folder = os.path.join(script_dir, 'Mic')
     output_folder = os.path.join(script_dir, 'Generated plots')
@@ -145,7 +150,8 @@ def main():
                 
                 p_raw = TdmsFile.read(tdms_p).groups()[0].channels()[0].data
                 
-                freqs, spsl_abs, spsl_nd, oaspl_raw = calculate_spsl(p_raw, fs, p_ref_thrust, bpf, f_min=11, f_max=18000)
+                # Unpack both OASPL variables
+                freqs, spsl_abs, spsl_nd, oaspl_abs_raw, oaspl_nd_raw = calculate_spsl(p_raw, fs, p_ref_thrust, bpf)
                 c = get_convection_results(Xm, Ym, Zm, v_inf)
                 
                 results.append({
@@ -153,7 +159,8 @@ def main():
                     'freqs': freqs, 
                     'spsl_corr_abs': spsl_abs + c['delta_db'],
                     'spsl_corr_nd': spsl_nd + c['delta_db'],
-                    'oaspl_corr_abs': oaspl_raw + c['delta_db'],
+                    'oaspl_corr_abs': oaspl_abs_raw + c['delta_db'],
+                    'oaspl_corr_nd': oaspl_nd_raw + c['delta_db'],
                     'p_ref': p_ref_thrust,
                     'ct': ct,
                     **c 
@@ -161,15 +168,16 @@ def main():
     
     df = pd.DataFrame(results)
 
-    print("\n" + "═"*60)
-    print(f"{'DUAL-SCALED AEROACOUSTIC & OASPL SUMMARY':^60}")
-    print("═"*60)
+    print("\n" + "═"*75)
+    print(f"{'DUAL-SCALED AEROACOUSTIC & OASPL SUMMARY':^75}")
+    print("═"*75)
     if not df.empty:
-        print(f"{'DPN':<6} | {'J':<5} | {'AoA':<5} | {'Ct':<8} | {'OASPL (11-3600Hz)':<18}")
-        print("-" * 60)
-        for _, r in df.head(5).iterrows():
-            print(f"{r['dpn']:<6} | {r['j']:<5.2f} | {r['aoa']:<5.1f} | {r['ct']:<8.4f} | {r['oaspl_corr_abs']:.2f} dB")
-    print("═"*60 + "\n")
+        # Adjusted print statement to show both values for every single point
+        print(f"{'DPN':<6} | {'J':<5} | {'AoA':<5} | {'Ct':<8} | {'OASPL (Abs)':<12} | {'OASPL (ND)':<12}")
+        print("-" * 75)
+        for _, r in df.iterrows():
+            print(f"{r['dpn']:<6} | {r['j']:<5.2f} | {r['aoa']:<5.1f} | {r['ct']:<8.4f} | {r['oaspl_corr_abs']:>7.2f} dB  | {r['oaspl_corr_nd']:>7.2f} dB")
+    print("═"*75 + "\n")
 
     # =========================================================================
     # --- PLOT 1: J Sweep - ABSOLUTE FREQUENCY (20uPa ref, Constant AoA) ---

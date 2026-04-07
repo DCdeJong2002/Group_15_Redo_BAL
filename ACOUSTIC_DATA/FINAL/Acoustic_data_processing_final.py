@@ -118,7 +118,6 @@ def calculate_spsl(p_mic, fs, p_ref_nd, bpf, N=8192):
 # ============================================================
 
 def main():
-    # Setup coordinates [0.55, 0.44, 0.43] meters
     Xm, Ym, Zm = 0.55, 0.44, 0.43
     fs, D, num_blades = 51200.0, 0.2032, 6
     rho = 1.225
@@ -274,7 +273,6 @@ def main():
     # =========================================================================
     plt.figure(figsize=(10, 6))
     
-    # Plotting this comparison for the first valid run in the dataframe (e.g., J=1.6, AoA=2.5)
     sample_row = df.iloc[0]
     
     plt.plot(sample_row['freqs'], sample_row['spsl_raw_abs'], 

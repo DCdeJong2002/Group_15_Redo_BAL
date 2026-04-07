@@ -47,6 +47,7 @@ python 04_acoustic_data_processing/Acoustic_data_processing_final.py
 │   ├── propOn_correction_pipeline_FINAL.py
 │   ├── TAILOFF_correction_pipeline_FINAL.py
 │   ├── generate_model_off_data_FINAL.py
+│   ├── generate_comparison_html_extended.py   #Used to generate html file inwhich data can be interactively compared
 │   ├── INPUT_BALANCE_DATA/          # Input: propOff.csv, CT experimental data
 │   ├── MODEL_OFF_DATA/              # model_off_corrections_grid.csv (generated)
 │   ├── results_propOff_FINAL/       # Output: propOff_final.csv

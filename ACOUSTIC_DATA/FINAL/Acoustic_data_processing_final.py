@@ -122,8 +122,8 @@ def main():
     Xm, Ym, Zm = 0.55, 0.44, 0.43
     fs, D, num_blades = 51200.0, 0.2032, 6
     rho = 1.225
+    c_sound = 343.0
     
-    # ADDED DPN22.txt to the target files
     target_files = ['DPN18.txt', 'DPN19.txt', 'DPN22.txt', 'DPN26.txt', 'DPN27.txt']
     script_dir = os.path.dirname(os.path.abspath(__file__))
     mic_folder = os.path.join(script_dir, 'Mic')
@@ -147,16 +147,19 @@ def main():
                 p_ref_thrust = abs(thrust_isolated) / (D**2)
                 
                 bpf = rps * num_blades
+                mach = v_inf / c_sound
                 
                 p_raw = TdmsFile.read(tdms_p).groups()[0].channels()[0].data
                 
                 # Unpack both OASPL variables
                 freqs, spsl_abs, spsl_nd, oaspl_abs_raw, oaspl_nd_raw = calculate_spsl(p_raw, fs, p_ref_thrust, bpf)
-                c = get_convection_results(Xm, Ym, Zm, v_inf)
+                c = get_convection_results(Xm, Ym, Zm, v_inf, c=c_sound)
                 
                 results.append({
                     'dpn': dpn, 'j': round(J, 2), 'aoa': aoa, 'rps': rps,
+                    'mach': mach,
                     'freqs': freqs, 
+                    'spsl_raw_abs': spsl_abs, # Store the uncorrected absolute SPSL
                     'spsl_corr_abs': spsl_abs + c['delta_db'],
                     'spsl_corr_nd': spsl_nd + c['delta_db'],
                     'oaspl_corr_abs': oaspl_abs_raw + c['delta_db'],
@@ -168,16 +171,29 @@ def main():
     
     df = pd.DataFrame(results)
 
+    # --- TABLE 1: AEROACOUSTIC & OASPL SUMMARY ---
     print("\n" + "═"*75)
     print(f"{'DUAL-SCALED AEROACOUSTIC & OASPL SUMMARY':^75}")
     print("═"*75)
     if not df.empty:
-        # Adjusted print statement to show both values for every single point
         print(f"{'DPN':<6} | {'J':<5} | {'AoA':<5} | {'Ct':<8} | {'OASPL (Abs)':<12} | {'OASPL (ND)':<12}")
         print("-" * 75)
         for _, r in df.iterrows():
             print(f"{r['dpn']:<6} | {r['j']:<5.2f} | {r['aoa']:<5.1f} | {r['ct']:<8.4f} | {r['oaspl_corr_abs']:>7.2f} dB  | {r['oaspl_corr_nd']:>7.2f} dB")
     print("═"*75 + "\n")
+
+    # --- TABLE 2: CONVECTION CORRECTION SUMMARY ---
+    print("\n" + "═"*82)
+    print(f"{'CONVECTION CORRECTION SUMMARY':^82}")
+    print("═"*82)
+    if not df.empty:
+        print(f"{'DPN':<6} | {'Mach':<6} | {'r [m]':<7} | {'theta_p [°]':<11} | {'theta [°]':<9} | {'r_prime [m]':<11} | {'Diff [dB]':<10}")
+        print("-" * 82)
+        for _, r in df.iterrows():
+            # Difference: Uncorrected - Corrected = -delta_db
+            diff_db = -r['delta_db']
+            print(f"{r['dpn']:<6} | {r['mach']:<6.4f} | {r['r']:<7.4f} | {r['theta_prime']:<11.2f} | {r['theta']:<9.2f} | {r['r_prime']:<11.4f} | {diff_db:>6.2f} dB")
+    print("═"*82 + "\n")
 
     # =========================================================================
     # --- PLOT 1: J Sweep - ABSOLUTE FREQUENCY (20uPa ref, Constant AoA) ---
@@ -185,8 +201,6 @@ def main():
     plt.figure(figsize=(7, 4))
     j_data = df[df['aoa'] == 2.5].sort_values('j')
     
-    j_colors = {1.6: 'tab:blue', 2.0: 'tab:orange', 2.8: 'tab:green'}
-    # PLOT 1 — replace the j_colors dict
     j_colors = {1.6: COLORS[0], 2.0: COLORS[1], 2.8: COLORS[2]}
 
     for i, (_, row) in enumerate(j_data.iterrows()):
@@ -254,6 +268,28 @@ def main():
     plt.grid(True, alpha=0.8)
 
     plt.savefig(os.path.join(output_folder, 'Alpha_Sweep_ThrustScaled.pdf'), dpi=300, bbox_inches='tight')
+
+    # =========================================================================
+    # --- PLOT 4: UNCORRECTED VS CORRECTED SPSL (Absolute Freq, 20uPa) ---
+    # =========================================================================
+    plt.figure(figsize=(10, 6))
+    
+    # Plotting this comparison for the first valid run in the dataframe (e.g., J=1.6, AoA=2.5)
+    sample_row = df.iloc[0]
+    
+    plt.plot(sample_row['freqs'], sample_row['spsl_raw_abs'], 
+             label='Uncorrected', color=COLORS[0], linewidth=1.2)
+    plt.plot(sample_row['freqs'], sample_row['spsl_corr_abs'], 
+             label='Corrected', color=COLORS[1], linewidth=1.2)
+    
+    plt.xlabel("Frequency [Hz]")
+    plt.ylabel(r"SPSL [dB/Hz] ($p_{ref}=20 \mu Pa$)")
+    plt.xlim([11, 3600]) 
+    plt.ylim([45, 85])
+    plt.legend(fontsize='small')
+    plt.grid(True, alpha=0.8)
+    
+    plt.savefig(os.path.join(output_folder, 'Uncorrected_vs_Corrected_SPSL.pdf'), dpi=400, bbox_inches='tight')
 
     plt.show()
 

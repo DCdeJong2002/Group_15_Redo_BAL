@@ -7,6 +7,12 @@ import numpy as np
 import pandas as pd
 
 
+
+"""
+This file contains the matlab routine which was converted to python used 
+for correcting the raw balance data files.
+"""
+
 # ============================================================
 # Utility / indexing
 # ============================================================

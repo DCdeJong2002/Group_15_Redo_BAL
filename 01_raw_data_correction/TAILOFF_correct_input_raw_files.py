@@ -7,6 +7,12 @@ import numpy as np
 import pandas as pd
 
 
+"""
+This file contains the matlab routine which was converted to python used 
+for correcting the raw balance data files. Now using TAILOFF data. Zero subtraction
+files were matched using timestamps in the data.
+"""
+
 # ============================================================
 # Utility / indexing
 # ============================================================
